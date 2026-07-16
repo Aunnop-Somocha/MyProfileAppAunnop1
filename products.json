@@ -1,0 +1,35 @@
+[
+  {
+    "id": "1",
+    "name": "Nike Air Max 90",
+    "stock": 15,
+    "stock_text": "15 in stock",
+    "category": "Shoes",
+    "location_count": 5,
+    "location_text": "5 stores",
+    "badge_status": "Active",
+    "image_url": "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200"
+  },
+  {
+    "id": "2",
+    "name": "Nike Air Force 1",
+    "stock": 20,
+    "stock_text": "20 in stock",
+    "category": "Shoes",
+    "location_count": 4,
+    "location_text": "4 stores",
+    "badge_status": "Active",
+    "image_url": "https://images.unsplash.com/photo-1600185365483-26d7a4cc7519?w=200"
+  },
+  {
+    "id": "3",
+    "name": "Nike Air Zoom Pegasus 39",
+    "stock": 8,
+    "stock_text": "8 in stock",
+    "category": "Shoes",
+    "location_count": 2,
+    "location_text": "2 stores",
+    "badge_status": "Active",
+    "image_url": "https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?w=200"
+  }
+]
