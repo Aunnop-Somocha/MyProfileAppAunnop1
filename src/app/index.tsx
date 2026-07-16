@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import {
-  ActivityIndicator,
   Image,
   SafeAreaView,
   ScrollView,
@@ -24,67 +23,19 @@ interface Product {
   image_url: string;
 }
 
-// Local Fallback Products Data
-const localFallbackProducts: Product[] = [
-  {
-    id: '1',
-    name: 'Nike Air Max 90',
-    stock: 15,
-    stock_text: '15 in stock',
-    category: 'Shoes',
-    location_count: 5,
-    location_text: '5 stores',
-    badge_status: 'Active',
-    image_url: 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200',
-  },
-  {
-    id: '2',
-    name: 'Nike Air Force 1',
-    stock: 20,
-    stock_text: '20 in stock',
-    category: 'Shoes',
-    location_count: 4,
-    location_text: '4 stores',
-    badge_status: 'Active',
-    image_url: 'https://images.unsplash.com/photo-1600185365483-26d7a4cc7519?w=200',
-  },
-  {
-    id: '3',
-    name: 'Nike Air Zoom Pegasus 39',
-    stock: 8,
-    stock_text: '8 in stock',
-    category: 'Shoes',
-    location_count: 2,
-    location_text: '2 stores',
-    badge_status: 'Active',
-    image_url: 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?w=200',
-  },
-];
+const PRODUCTS_URL = 'https://raw.githubusercontent.com/Aunnop-Somocha/MyProfileAppAunnop1/refs/heads/master/products.json';
 
 export default function ProductsScreen() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [products, setProducts] = useState<Product[]>(localFallbackProducts);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [products, setProducts] = useState<Product[]>([]);
 
   useEffect(() => {
-    fetch('https://raw.githubusercontent.com/Aunnop-Somocha/MyProfileAppAunnop1/master/products.json')
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error('Failed to fetch from GitHub');
-        }
-        return response.json();
-      })
-      .then((data) => {
-        setProducts(data);
-        setError(null);
-        setLoading(false);
-      })
-      .catch((err) => {
-        console.warn('Error fetching products from GitHub, using local fallback:', err);
-        setError(err.message);
-        setLoading(false);
-      });
+    async function loadProducts() {
+      const response = await fetch(PRODUCTS_URL);
+      const data = await response.json();
+      setProducts(data);
+    }
+    void loadProducts();
   }, []);
 
   const filteredProducts = products.filter(
@@ -107,27 +58,6 @@ export default function ProductsScreen() {
           <TouchableOpacity style={styles.profileButton}>
             <Text style={styles.profileIcon}>👤</Text>
           </TouchableOpacity>
-        </View>
-
-        {/* GitHub Sync Status Bar */}
-        <View style={[
-          styles.statusBarContainer,
-          error ? styles.statusBarError : styles.statusBarSuccess
-        ]}>
-          {loading ? (
-            <View style={styles.statusBarContent}>
-              <ActivityIndicator size="small" color="#8B5CF6" style={{ marginRight: 6 }} />
-              <Text style={styles.statusBarLoadingText}>Fetching products from GitHub...</Text>
-            </View>
-          ) : error ? (
-            <Text style={styles.statusBarErrorText}>
-              Using Local Fallback (Push products.json to GitHub to sync)
-            </Text>
-          ) : (
-            <Text style={styles.statusBarSuccessText}>
-              Products synced live from GitHub!
-            </Text>
-          )}
         </View>
 
         {/* Search Container */}
@@ -399,40 +329,5 @@ const styles = StyleSheet.create({
   navText: {
     fontSize: 12,
     color: '#666',
-  },
-  // Status Bar Styles
-  statusBarContainer: {
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderBottomWidth: 1,
-  },
-  statusBarSuccess: {
-    backgroundColor: '#ECFDF5',
-    borderBottomColor: '#A7F3D0',
-  },
-  statusBarError: {
-    backgroundColor: '#FEF2F2',
-    borderBottomColor: '#FCA5A5',
-  },
-  statusBarContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statusBarLoadingText: {
-    fontSize: 12,
-    color: '#8B5CF6',
-    fontWeight: '500',
-  },
-  statusBarSuccessText: {
-    fontSize: 12,
-    color: '#059669',
-    fontWeight: '500',
-  },
-  statusBarErrorText: {
-    fontSize: 12,
-    color: '#DC2626',
-    fontWeight: '500',
   },
 });
