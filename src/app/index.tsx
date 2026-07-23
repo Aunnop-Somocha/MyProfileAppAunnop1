@@ -24,6 +24,7 @@ interface Product {
 }
 
 const PRODUCTS_URL = 'https://raw.githubusercontent.com/Aunnop-Somocha/MyProfileAppAunnop1/refs/heads/master/products.json';
+const BACKEND_URL = 'http://localhost:3049/products';
 
 export default function ProductsScreen() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -31,9 +32,25 @@ export default function ProductsScreen() {
 
   useEffect(() => {
     async function loadProducts() {
-      const response = await fetch(PRODUCTS_URL);
-      const data = await response.json();
-      setProducts(data);
+      try {
+        const response = await fetch(BACKEND_URL);
+        if (response.ok) {
+          const data = await response.json();
+          setProducts(data);
+          console.log('Successfully fetched products from local database.');
+          return;
+        }
+      } catch (err) {
+        console.log('Local backend server not available, fetching fallback products from GitHub.');
+      }
+
+      try {
+        const response = await fetch(PRODUCTS_URL);
+        const data = await response.json();
+        setProducts(data);
+      } catch (err) {
+        console.error('Error fetching fallback products:', err);
+      }
     }
     void loadProducts();
   }, []);
