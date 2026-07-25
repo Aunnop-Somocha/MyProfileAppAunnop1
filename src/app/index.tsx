@@ -24,7 +24,7 @@ interface Product {
 }
 
 const PRODUCTS_URL = 'https://raw.githubusercontent.com/Aunnop-Somocha/MyProfileAppAunnop1/refs/heads/master/products.json';
-const BACKEND_URL = 'http://localhost:3049/products';
+const BACKEND_URL = 'http://119.59.102.161/web/dcas/ip/std6730202530/api/products';
 
 export default function ProductsScreen() {
   const [searchQuery, setSearchQuery] = useState('');
