@@ -3,7 +3,7 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 const express = require('express');
 const cors = require('cors');
 const mysql = require('mysql2/promise');
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
 const app = express();
@@ -27,12 +27,12 @@ const pool = mysql.createPool({
 });
 
 // Startup Database Test (As per slide instructions)
-(async function testMySQL(){
-  try{
+(async function testMySQL() {
+  try {
     const conn = await pool.getConnection();
     console.log('Connected to MySQL:', process.env.DB_NAME);
     conn.release();
-  }catch(err){
+  } catch (err) {
     console.error('MySQL Failed:', err.message);
     // Commented out to prevent the server from crashing when database is unreachable
     // process.exit(1);
@@ -65,11 +65,11 @@ app.get('/api/products', async (req, res) => {
     res.json(rows);
   } catch (e) {
     console.log('Products table query failed. Attempting fallback to Inventory table:', e.message);
-    
+
     // 2. Fallback to Inventory table if products table doesn't exist
     try {
       const [rows] = await pool.query('SELECT * FROM Inventory ORDER BY id DESC');
-      
+
       // Map Inventory columns to the structure expected by the Expo frontend
       const mappedRows = rows.map(row => {
         let locationCount = 0;
@@ -130,7 +130,7 @@ app.post('/api/products', async (req, res) => {
     res.status(201).json({ message: 'Product created successfully', productId: result.insertId });
   } catch (err) {
     console.log('Inserting into products table failed. Attempting Inventory table insertion:', err.message);
-    
+
     try {
       const [result] = await pool.query(
         `INSERT INTO Inventory (name, stock, category, location, status, brand, sizes)

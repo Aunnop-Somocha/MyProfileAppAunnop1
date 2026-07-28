@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
+  Alert,
   Image,
   SafeAreaView,
   ScrollView,
@@ -25,34 +26,98 @@ interface Product {
 
 const PRODUCTS_URL = 'https://raw.githubusercontent.com/Aunnop-Somocha/MyProfileAppAunnop1/refs/heads/master/products.json';
 const BACKEND_URL = 'http://119.59.102.161/web/dcas/ip/std6730202530/api/products';
+const API_BASE_URL = 'http://119.59.102.161:3049/api';
+
+// Enhanced API Call function with better error handling for cloud
+const apiCall = async (endpoint: string, options: any = {}, authToken?: string) => {
+  const isPost = options.method && options.method.toUpperCase() !== 'GET';
+  const config = {
+    ...options,
+    headers: {
+      ...(isPost && { 'Content-Type': 'application/json' }),
+      ...(authToken && { Authorization: `Bearer ${authToken}` }),
+      ...options.headers,
+    },
+  };
+
+  const response = await fetch(endpoint, config);
+  if (!response.ok) {
+    throw new Error(`API call failed with status: ${response.status}`);
+  }
+  return response.json();
+};
 
 export default function ProductsScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
+  const [authToken, setAuthToken] = useState<string | null>(null);
+  const [currentScreen, setCurrentScreen] = useState<string>('products');
 
-  useEffect(() => {
-    async function loadProducts() {
+  // fetchProducts function (As per Slide 24)
+  const fetchProducts = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+
+      let data: any;
       try {
-        const response = await fetch(BACKEND_URL);
-        if (response.ok) {
-          const data = await response.json();
-          setProducts(data);
-          console.log('Successfully fetched products from local database.');
-          return;
+        data = await apiCall(BACKEND_URL);
+      } catch (err) {
+        try {
+          data = await apiCall('http://119.59.102.161:3049/api/products');
+        } catch (err2) {
+          const response = await fetch(PRODUCTS_URL);
+          data = await response.json();
         }
-      } catch (err) {
-        console.log('Local backend server not available, fetching fallback products from GitHub.');
       }
 
-      try {
-        const response = await fetch(PRODUCTS_URL);
-        const data = await response.json();
-        setProducts(data);
-      } catch (err) {
-        console.error('Error fetching fallback products:', err);
+      if (!Array.isArray(data)) {
+        throw new Error('Invalid data format received');
       }
+
+      const parsedData = data.map((product: any) => ({
+        id: String(product.id || Math.random()),
+        name: product.name || '',
+        stock: product.stock || 0,
+        stock_text: product.stock_text || `${product.stock || 0} in stock`,
+        category: product.category || 'Uncategorized',
+        location_count: product.location_count || 0,
+        location_text: product.location_text || '0 stores',
+        badge_status: product.badge_status || 'Active',
+        image_url: product.image_url || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200',
+        ...product,
+      }));
+
+      setProducts(parsedData);
+      console.log(`Loaded ${parsedData.length} products`);
+    } catch (err: any) {
+      console.error('Fetch products error:', err);
+      setError(err.message || 'Failed to load products');
+      Alert.alert('Error', `Failed to load products: ${err.message}`);
+    } finally {
+      setLoading(false);
     }
-    void loadProducts();
+  };
+
+  // 1. Fetch products when navigating to 'products' screen (As per Slide 25)
+  useEffect(() => {
+    if (authToken && currentScreen === 'products') {
+      void fetchProducts();
+    }
+  }, [authToken, currentScreen]);
+
+  // 2. Auto-fetch products when accessing dashboard (As per Slide 25)
+  useEffect(() => {
+    if (authToken && currentScreen === 'dashboard' && products.length === 0) {
+      void fetchProducts();
+    }
+  }, [authToken, currentScreen, products.length]);
+
+  // Default auto-fetch products on screen load (As per Slide 26)
+  useEffect(() => {
+    void fetchProducts();
   }, []);
 
   const filteredProducts = products.filter(
