@@ -60,15 +60,52 @@ function authenticateToken(req, res, next) {
 // 1. GET /api/products - Fetch products (As per slide, with robust fallback)
 app.get('/api/products', async (req, res) => {
   try {
-    // 1. Try to query the products table (ordered by lastUpdate desc) as shown in the slide
-    const [rows] = await pool.query('SELECT * FROM products ORDER BY lastUpdate DESC');
-    res.json(rows);
+    // 1. Try to query the products table (ordered by id desc if lastUpdate is missing)
+    let rows;
+    try {
+      [rows] = await pool.query('SELECT * FROM products ORDER BY lastUpdate DESC');
+    } catch (err) {
+      [rows] = await pool.query('SELECT * FROM products ORDER BY id DESC');
+    }
+
+    const imageMap = {
+      'Nike Air Max 90': 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200',
+      'Nike Air Force 1': 'https://images.unsplash.com/photo-1600185365483-26d7a4cc7519?w=200',
+      'Nike Air Zoom Pegasus 39': 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?w=200'
+    };
+
+    const colorMap = {
+      'Nike Air Max 90': 'Red / White',
+      'Nike Air Force 1': 'White / Orange',
+      'Nike Air Zoom Pegasus 39': 'Lime Green / Black'
+    };
+
+    const mappedRows = rows.map(row => ({
+      ...row,
+      image_url: row.image_url || imageMap[row.name] || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200',
+      brand: row.brand || (row.name && row.name.startsWith('Nike') ? 'Nike' : 'Nike'),
+      color: row.color || colorMap[row.name] || 'Standard'
+    }));
+
+    res.json(mappedRows);
   } catch (e) {
     console.log('Products table query failed. Attempting fallback to Inventory table:', e.message);
 
     // 2. Fallback to Inventory table if products table doesn't exist
     try {
       const [rows] = await pool.query('SELECT * FROM Inventory ORDER BY id DESC');
+
+      const imageMap = {
+        'Nike Air Max 90': 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200',
+        'Nike Air Force 1': 'https://images.unsplash.com/photo-1600185365483-26d7a4cc7519?w=200',
+        'Nike Air Zoom Pegasus 39': 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?w=200'
+      };
+
+      const colorMap = {
+        'Nike Air Max 90': 'Red / White',
+        'Nike Air Force 1': 'White / Orange',
+        'Nike Air Zoom Pegasus 39': 'Lime Green / Black'
+      };
 
       // Map Inventory columns to the structure expected by the Expo frontend
       const mappedRows = rows.map(row => {
@@ -77,12 +114,6 @@ app.get('/api/products', async (req, res) => {
           const match = row.location.match(/\d+/);
           if (match) locationCount = parseInt(match[0], 10);
         }
-
-        const imageMap = {
-          'Nike Air Max 90': 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200',
-          'Nike Air Force 1': 'https://images.unsplash.com/photo-1600185365483-26d7a4cc7519?w=200',
-          'Nike Air Zoom Pegasus 39': 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?w=200'
-        };
 
         return {
           id: String(row.id),
@@ -93,8 +124,9 @@ app.get('/api/products', async (req, res) => {
           location_count: locationCount,
           location_text: row.location || '0 stores',
           badge_status: row.status || 'Active',
-          image_url: imageMap[row.name] || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200',
-          brand: row.brand || '',
+          image_url: row.image_url || imageMap[row.name] || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200',
+          brand: row.brand || 'Nike',
+          color: row.color || colorMap[row.name] || 'Standard',
           sizes: row.sizes || ''
         };
       });
@@ -115,37 +147,76 @@ app.get('/products', async (req, res) => {
 
 // 2. POST /api/products - Add a product (supports both products and Inventory tables)
 app.post('/api/products', async (req, res) => {
-  const { name, stock, category, location, status, brand, sizes } = req.body;
+  const { name, stock, stock_text, category, location_count, location_text, location, status, badge_status, brand, color, image_url } = req.body;
 
   if (!name || stock === undefined) {
     return res.status(400).json({ message: 'Product name and stock are required' });
   }
 
+  const stockNum = parseInt(stock, 10) || 0;
+  const sText = stock_text || `${stockNum} in stock`;
+  const bBrand = brand || 'Nike';
+  const cColor = color || 'Standard';
+  const cCategory = category || 'Shoes';
+  const lText = location_text || location || '3 stores';
+  const lCount = location_count || parseInt((lText.match(/\d+/) || ['3'])[0], 10);
+  const bStatus = badge_status || status || 'Active';
+  const imgUrl = image_url || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200';
+
   try {
     // Try to insert into products table first
     const [result] = await pool.query(
-      `INSERT INTO products (name, stock, category, brand, sizes) VALUES (?, ?, ?, ?, ?)`,
-      [name, parseInt(stock, 10), category || '', brand || '', sizes || '']
+      `INSERT INTO products (name, brand, color, stock, stock_text, category, location_count, location_text, badge_status, image_url)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [name, bBrand, cColor, stockNum, sText, cCategory, lCount, lText, bStatus, imgUrl]
     );
-    res.status(201).json({ message: 'Product created successfully', productId: result.insertId });
+    res.status(201).json({
+      message: 'Product created successfully',
+      productId: result.insertId,
+      product: {
+        id: String(result.insertId),
+        name,
+        brand: bBrand,
+        color: cColor,
+        stock: stockNum,
+        stock_text: sText,
+        category: cCategory,
+        location_count: lCount,
+        location_text: lText,
+        badge_status: bStatus,
+        image_url: imgUrl
+      }
+    });
   } catch (err) {
     console.log('Inserting into products table failed. Attempting Inventory table insertion:', err.message);
 
     try {
+      try {
+        await pool.query(`ALTER TABLE Inventory ADD COLUMN image_url TEXT`);
+      } catch (e) { /* column may exist */ }
+
       const [result] = await pool.query(
-        `INSERT INTO Inventory (name, stock, category, location, status, brand, sizes)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [
-          name,
-          parseInt(stock, 10),
-          category || 'Uncategorized',
-          location || '0 stores',
-          status || 'Active',
-          brand || '',
-          sizes || ''
-        ]
+        `INSERT INTO Inventory (name, stock, category, location, status, brand, color, image_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [name, stockNum, cCategory, lText, bStatus, bBrand, cColor, imgUrl]
       );
-      res.status(201).json({ message: 'Product created successfully', productId: result.insertId });
+      res.status(201).json({
+        message: 'Product created successfully',
+        productId: result.insertId,
+        product: {
+          id: String(result.insertId),
+          name,
+          brand: bBrand,
+          color: cColor,
+          stock: stockNum,
+          stock_text: sText,
+          category: cCategory,
+          location_count: lCount,
+          location_text: lText,
+          badge_status: bStatus,
+          image_url: imgUrl
+        }
+      });
     } catch (fallbackErr) {
       console.error('Inventory insertion failed:', fallbackErr.message);
       res.status(500).json({ message: 'Internal server error' });
@@ -156,6 +227,68 @@ app.post('/api/products', async (req, res) => {
 // Also expose POST /products for compatibility
 app.post('/products', async (req, res) => {
   req.url = '/api/products';
+  app.handle(req, res);
+});
+
+// 2.5 PUT /api/products/:id - Update product details in database
+app.put('/api/products/:id', async (req, res) => {
+  const { id } = req.params;
+  const { name, stock, stock_text, category, location_count, location_text, location, status, badge_status, brand, color, image_url } = req.body;
+
+  if (!id) {
+    return res.status(400).json({ message: 'Product ID is required' });
+  }
+
+  const stockNum = stock !== undefined ? parseInt(stock, 10) : 0;
+  const sText = stock_text || `${stockNum} in stock`;
+  const bBrand = brand || 'Nike';
+  const cColor = color || 'Standard';
+  const cCategory = category || 'Shoes';
+  const lText = location_text || location || '3 stores';
+  const lCount = location_count || parseInt((lText.match(/\d+/) || ['3'])[0], 10);
+  const bStatus = badge_status || status || 'Active';
+  const imgUrl = image_url || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200';
+
+  try {
+    // 1. Try to update products table
+    await pool.query(
+      `UPDATE products 
+       SET name = ?, brand = ?, color = ?, stock = ?, stock_text = ?, category = ?, location_count = ?, location_text = ?, badge_status = ?, image_url = ?
+       WHERE id = ?`,
+      [name, bBrand, cColor, stockNum, sText, cCategory, lCount, lText, bStatus, imgUrl, id]
+    );
+
+    res.json({
+      message: 'Product updated successfully',
+      product: { id, name, brand: bBrand, color: cColor, stock: stockNum, stock_text: sText, category: cCategory, location_count: lCount, location_text: lText, badge_status: bStatus, image_url: imgUrl }
+    });
+  } catch (err) {
+    console.log('Updating products table failed. Attempting Inventory table update:', err.message);
+
+    try {
+      try {
+        await pool.query(`ALTER TABLE Inventory ADD COLUMN image_url TEXT`);
+      } catch (e) { /* column may exist */ }
+
+      await pool.query(
+        `UPDATE Inventory 
+         SET name = ?, stock = ?, category = ?, location = ?, status = ?, brand = ?, color = ?, image_url = ?
+         WHERE id = ?`,
+        [name, stockNum, cCategory, lText, bStatus, bBrand, cColor, imgUrl, id]
+      );
+      res.json({
+        message: 'Product updated successfully',
+        product: { id, name, brand: bBrand, color: cColor, stock: stockNum, stock_text: sText, category: cCategory, location_count: lCount, location_text: lText, badge_status: bStatus, image_url: imgUrl }
+      });
+    } catch (fallbackErr) {
+      console.error('Inventory update failed:', fallbackErr.message);
+      res.status(500).json({ message: 'Internal server error' });
+    }
+  }
+});
+
+app.put('/products/:id', async (req, res) => {
+  req.url = `/api/products/${req.params.id}`;
   app.handle(req, res);
 });
 

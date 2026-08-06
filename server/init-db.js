@@ -45,6 +45,8 @@ async function initDB() {
       CREATE TABLE IF NOT EXISTS products (
         id INT AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
+        brand VARCHAR(100),
+        color VARCHAR(100),
         stock INT NOT NULL,
         stock_text VARCHAR(100),
         category VARCHAR(100),
@@ -55,6 +57,14 @@ async function initDB() {
       )
     `);
 
+    // Ensure columns exist if table was previously created without brand/color
+    try {
+      await connection.query(`ALTER TABLE products ADD COLUMN brand VARCHAR(100)`);
+    } catch (e) { /* Column may already exist */ }
+    try {
+      await connection.query(`ALTER TABLE products ADD COLUMN color VARCHAR(100)`);
+    } catch (e) { /* Column may already exist */ }
+
     // 4. Seed products if empty
     const [rows] = await connection.query('SELECT COUNT(*) as count FROM products');
     if (rows[0].count === 0) {
@@ -64,10 +74,12 @@ async function initDB() {
         const productsData = JSON.parse(fs.readFileSync(productsJsonPath, 'utf8'));
         for (const product of productsData) {
           await connection.query(
-            `INSERT INTO products (name, stock, stock_text, category, location_count, location_text, badge_status, image_url)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO products (name, brand, color, stock, stock_text, category, location_count, location_text, badge_status, image_url)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               product.name,
+              product.brand || 'Nike',
+              product.color || 'Default',
               product.stock,
               product.stock_text,
               product.category,

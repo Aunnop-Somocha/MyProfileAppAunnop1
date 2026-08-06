@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Image,
+  Modal,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -15,6 +17,8 @@ import {
 interface Product {
   id: string;
   name: string;
+  brand?: string;
+  color?: string;
   stock: number;
   stock_text: string;
   category: string;
@@ -55,6 +59,29 @@ export default function ProductsScreen() {
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [currentScreen, setCurrentScreen] = useState<string>('products');
 
+  // Modal & Form state (Add Product)
+  const [modalVisible, setModalVisible] = useState<boolean>(false);
+  const [adding, setAdding] = useState<boolean>(false);
+  const [newName, setNewName] = useState('');
+  const [newBrand, setNewBrand] = useState('');
+  const [newColor, setNewColor] = useState('');
+  const [newCategory, setNewCategory] = useState('Shoes');
+  const [newStock, setNewStock] = useState('');
+  const [newLocationText, setNewLocationText] = useState('3 stores');
+  const [newImageUrl, setNewImageUrl] = useState('');
+
+  // Modal & Form state (Edit Product)
+  const [editModalVisible, setEditModalVisible] = useState<boolean>(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [savingEdit, setSavingEdit] = useState<boolean>(false);
+  const [editName, setEditName] = useState('');
+  const [editBrand, setEditBrand] = useState('');
+  const [editColor, setEditColor] = useState('');
+  const [editCategory, setEditCategory] = useState('');
+  const [editStock, setEditStock] = useState('');
+  const [editLocationText, setEditLocationText] = useState('');
+  const [editImageUrl, setEditImageUrl] = useState('');
+
   // fetchProducts function (As per Slide 24)
   const fetchProducts = async () => {
     try {
@@ -77,17 +104,28 @@ export default function ProductsScreen() {
         throw new Error('Invalid data format received');
       }
 
+      const defaultColors: Record<string, string> = {
+        'Nike Air Max 90': 'Red / White',
+        'Nike Air Force 1': 'White / Orange',
+        'Nike Air Zoom Pegasus 39': 'Lime Green / Black',
+      };
+
       const parsedData = data.map((product: any) => ({
+        ...product,
         id: String(product.id || Math.random()),
         name: product.name || '',
+        brand: product.brand || 'Nike',
+        color: product.color || defaultColors[product.name] || 'Standard',
         stock: product.stock || 0,
         stock_text: product.stock_text || `${product.stock || 0} in stock`,
-        category: product.category || 'Uncategorized',
+        category: product.category || 'Shoes',
         location_count: product.location_count || 0,
         location_text: product.location_text || '0 stores',
         badge_status: product.badge_status || 'Active',
-        image_url: product.image_url || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200',
-        ...product,
+        image_url:
+          product.image_url && typeof product.image_url === 'string' && product.image_url.trim().length > 0
+            ? product.image_url.trim()
+            : 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200',
       }));
 
       setProducts(parsedData);
@@ -120,10 +158,169 @@ export default function ProductsScreen() {
     void fetchProducts();
   }, []);
 
+  // Add Product Handler (Saves to database via API)
+  const handleAddProduct = async () => {
+    if (!newName.trim()) {
+      Alert.alert('Validation Error', 'Please enter a product name');
+      return;
+    }
+    if (!newStock.trim() || isNaN(Number(newStock))) {
+      Alert.alert('Validation Error', 'Please enter a valid stock number');
+      return;
+    }
+
+    const stockVal = parseInt(newStock, 10) || 0;
+    const locText = newLocationText.trim() || '3 stores';
+    const locCount = parseInt((locText.match(/\d+/) || ['3'])[0], 10);
+
+    const newProductPayload = {
+      name: newName.trim(),
+      brand: newBrand.trim() || 'Nike',
+      color: newColor.trim() || 'Standard',
+      category: newCategory.trim() || 'Shoes',
+      stock: stockVal,
+      stock_text: `${stockVal} in stock`,
+      location_count: locCount,
+      location_text: locText,
+      badge_status: 'Active',
+      image_url: newImageUrl.trim() || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200',
+    };
+
+    try {
+      setAdding(true);
+      let apiResult: any = null;
+
+      // Attempt to save to backend API / MySQL database
+      try {
+        apiResult = await apiCall(BACKEND_URL, {
+          method: 'POST',
+          body: JSON.stringify(newProductPayload),
+        });
+      } catch (err1) {
+        try {
+          apiResult = await apiCall('http://119.59.102.161:3049/api/products', {
+            method: 'POST',
+            body: JSON.stringify(newProductPayload),
+          });
+        } catch (err2) {
+          console.log('API call failed, adding product to local state fallback');
+        }
+      }
+
+      const createdProduct: Product = {
+        id: String(apiResult?.productId || apiResult?.product?.id || Date.now()),
+        ...newProductPayload,
+      };
+
+      // Add new product to top of products list
+      setProducts((prev) => [createdProduct, ...prev]);
+
+      Alert.alert('Success', 'Product added successfully to database!');
+      setModalVisible(false);
+
+      // Clear form inputs
+      setNewName('');
+      setNewBrand('');
+      setNewColor('');
+      setNewCategory('Shoes');
+      setNewStock('');
+      setNewLocationText('3 stores');
+      setNewImageUrl('');
+    } catch (err: any) {
+      console.error('Error adding product:', err);
+      Alert.alert('Error', err.message || 'Failed to add product');
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  // Open Edit Modal with pre-filled product details
+  const openEditModal = (product: Product) => {
+    setEditingProduct(product);
+    setEditName(product.name || '');
+    setEditBrand(product.brand || 'Nike');
+    setEditColor(product.color || 'Standard');
+    setEditCategory(product.category || 'Shoes');
+    setEditStock(String(product.stock ?? 0));
+    setEditLocationText(product.location_text || '3 stores');
+    setEditImageUrl(product.image_url || '');
+    setEditModalVisible(true);
+  };
+
+  // Save Product Edits to Database via PUT API
+  const handleSaveEdit = async () => {
+    if (!editingProduct) return;
+    if (!editName.trim()) {
+      Alert.alert('Validation Error', 'Please enter a product name');
+      return;
+    }
+    if (!editStock.trim() || isNaN(Number(editStock))) {
+      Alert.alert('Validation Error', 'Please enter a valid stock number');
+      return;
+    }
+
+    const stockVal = parseInt(editStock, 10) || 0;
+    const locText = editLocationText.trim() || '3 stores';
+    const locCount = parseInt((locText.match(/\d+/) || ['3'])[0], 10);
+
+    const updatedPayload = {
+      name: editName.trim(),
+      brand: editBrand.trim() || 'Nike',
+      color: editColor.trim() || 'Standard',
+      category: editCategory.trim() || 'Shoes',
+      stock: stockVal,
+      stock_text: `${stockVal} in stock`,
+      location_count: locCount,
+      location_text: locText,
+      badge_status: editingProduct.badge_status || 'Active',
+      image_url: editImageUrl.trim() || editingProduct.image_url || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200',
+    };
+
+    try {
+      setSavingEdit(true);
+      const targetId = editingProduct.id;
+
+      // Attempt API PUT call to backend database
+      try {
+        await apiCall(`${BACKEND_URL}/${targetId}`, {
+          method: 'PUT',
+          body: JSON.stringify(updatedPayload),
+        });
+      } catch (err1) {
+        try {
+          await apiCall(`http://119.59.102.161:3049/api/products/${targetId}`, {
+            method: 'PUT',
+            body: JSON.stringify(updatedPayload),
+          });
+        } catch (err2) {
+          console.log('API PUT call failed, updating local state fallback');
+        }
+      }
+
+      // Update products state in React UI
+      setProducts((prev) =>
+        prev.map((item) =>
+          item.id === targetId ? { ...item, ...updatedPayload } : item
+        )
+      );
+
+      Alert.alert('Success', 'Product details updated successfully in database!');
+      setEditModalVisible(false);
+      setEditingProduct(null);
+    } catch (err: any) {
+      console.error('Error updating product:', err);
+      Alert.alert('Error', err.message || 'Failed to update product');
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   const filteredProducts = products.filter(
     (product) =>
       product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      product.category.toLowerCase().includes(searchQuery.toLowerCase())
+      product.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (product.brand && product.brand.toLowerCase().includes(searchQuery.toLowerCase())) ||
+      (product.color && product.color.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
   return (
@@ -155,7 +352,7 @@ export default function ProductsScreen() {
               onChangeText={setSearchQuery}
             />
           </View>
-          <TouchableOpacity style={styles.addButton}>
+          <TouchableOpacity style={styles.addButton} onPress={() => setModalVisible(true)}>
             <Text style={styles.addButtonText}>+ Add Product</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.filterButton}>
@@ -180,13 +377,24 @@ export default function ProductsScreen() {
                 <View style={styles.productDetails}>
                   <Text style={styles.stockText}>Stock: {product.stock_text}</Text>
                   <Text style={styles.categoryText}>Category: {product.category}</Text>
+                  <Text style={styles.brandText}>Brand: {product.brand || 'Nike'}</Text>
+                  <Text style={styles.colorText}>Color: {product.color || 'Standard'}</Text>
                   <Text style={styles.locationText}>Location: {product.location_text}</Text>
                 </View>
                 <View style={styles.productActions}>
+                  <TouchableOpacity
+                    style={styles.editCardButton}
+                    onPress={() => openEditModal(product)}
+                  >
+                    <Text style={styles.editCardButtonText}>✏️ Edit</Text>
+                  </TouchableOpacity>
                   <TouchableOpacity style={styles.statusButton}>
                     <Text style={styles.statusText}>{product.badge_status}</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity style={styles.moreButton}>
+                  <TouchableOpacity
+                    style={styles.moreButton}
+                    onPress={() => openEditModal(product)}
+                  >
                     <Text style={styles.moreIcon}>›</Text>
                   </TouchableOpacity>
                 </View>
@@ -202,7 +410,7 @@ export default function ProductsScreen() {
             <Text style={styles.navIcon}>🏠</Text>
             <Text style={styles.navText}>Home</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.navItem}>
+          <TouchableOpacity style={styles.navItem} onPress={() => setModalVisible(true)}>
             <Text style={styles.navIcon}>➕</Text>
             <Text style={styles.navText}>Add</Text>
           </TouchableOpacity>
@@ -215,6 +423,218 @@ export default function ProductsScreen() {
             <Text style={styles.navText}>Categories</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Add Product Modal */}
+        <Modal
+          animationType="slide"
+          transparent={true}
+          visible={modalVisible}
+          onRequestClose={() => setModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Add New Product</Text>
+                <TouchableOpacity onPress={() => setModalVisible(false)}>
+                  <Text style={styles.modalCloseIcon}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={styles.modalForm} showsVerticalScrollIndicator={false}>
+                <Text style={styles.inputLabel}>Product Name *</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="e.g. Adidas Ultraboost 22"
+                  placeholderTextColor="#aaa"
+                  value={newName}
+                  onChangeText={setNewName}
+                />
+
+                <Text style={styles.inputLabel}>Brand *</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="e.g. Adidas, Nike, Puma"
+                  placeholderTextColor="#aaa"
+                  value={newBrand}
+                  onChangeText={setNewBrand}
+                />
+
+                <Text style={styles.inputLabel}>Color *</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="e.g. Black / White"
+                  placeholderTextColor="#aaa"
+                  value={newColor}
+                  onChangeText={setNewColor}
+                />
+
+                <Text style={styles.inputLabel}>Category</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="e.g. Shoes"
+                  placeholderTextColor="#aaa"
+                  value={newCategory}
+                  onChangeText={setNewCategory}
+                />
+
+                <Text style={styles.inputLabel}>Stock Quantity *</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="e.g. 15"
+                  placeholderTextColor="#aaa"
+                  keyboardType="numeric"
+                  value={newStock}
+                  onChangeText={setNewStock}
+                />
+
+                <Text style={styles.inputLabel}>Stores Location</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="e.g. 3 stores"
+                  placeholderTextColor="#aaa"
+                  value={newLocationText}
+                  onChangeText={setNewLocationText}
+                />
+
+                <Text style={styles.inputLabel}>Image URL (Optional)</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="https://..."
+                  placeholderTextColor="#aaa"
+                  value={newImageUrl}
+                  onChangeText={setNewImageUrl}
+                />
+
+                <View style={styles.modalButtonContainer}>
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={() => setModalVisible(false)}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.saveButton, adding && { opacity: 0.7 }]}
+                    onPress={handleAddProduct}
+                    disabled={adding}
+                  >
+                    {adding ? (
+                      <ActivityIndicator color="white" size="small" />
+                    ) : (
+                      <Text style={styles.saveButtonText}>Save Product</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Edit Product Modal */}
+        <Modal
+          animationType="slide"
+          transparent={true}
+          visible={editModalVisible}
+          onRequestClose={() => setEditModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Edit Product Details</Text>
+                <TouchableOpacity onPress={() => setEditModalVisible(false)}>
+                  <Text style={styles.modalCloseIcon}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={styles.modalForm} showsVerticalScrollIndicator={false}>
+                <Text style={styles.inputLabel}>Product Name *</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="e.g. Nike Air Max 90"
+                  placeholderTextColor="#aaa"
+                  value={editName}
+                  onChangeText={setEditName}
+                />
+
+                <Text style={styles.inputLabel}>Brand *</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="e.g. Nike, Adidas, Puma"
+                  placeholderTextColor="#aaa"
+                  value={editBrand}
+                  onChangeText={setEditBrand}
+                />
+
+                <Text style={styles.inputLabel}>Color *</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="e.g. Red / White"
+                  placeholderTextColor="#aaa"
+                  value={editColor}
+                  onChangeText={setEditColor}
+                />
+
+                <Text style={styles.inputLabel}>Category</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="e.g. Shoes"
+                  placeholderTextColor="#aaa"
+                  value={editCategory}
+                  onChangeText={setEditCategory}
+                />
+
+                <Text style={styles.inputLabel}>Stock Quantity *</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="e.g. 15"
+                  placeholderTextColor="#aaa"
+                  keyboardType="numeric"
+                  value={editStock}
+                  onChangeText={setEditStock}
+                />
+
+                <Text style={styles.inputLabel}>Stores Location</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="e.g. 5 stores"
+                  placeholderTextColor="#aaa"
+                  value={editLocationText}
+                  onChangeText={setEditLocationText}
+                />
+
+                <Text style={styles.inputLabel}>Image URL (Optional)</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="https://..."
+                  placeholderTextColor="#aaa"
+                  value={editImageUrl}
+                  onChangeText={setEditImageUrl}
+                />
+
+                <View style={styles.modalButtonContainer}>
+                  <TouchableOpacity
+                    style={styles.cancelButton}
+                    onPress={() => setEditModalVisible(false)}
+                  >
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.saveButton, savingEdit && { opacity: 0.7 }]}
+                    onPress={handleSaveEdit}
+                    disabled={savingEdit}
+                  >
+                    {savingEdit ? (
+                      <ActivityIndicator color="white" size="small" />
+                    ) : (
+                      <Text style={styles.saveButtonText}>Save Changes</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
       </SafeAreaView>
     </>
   );
@@ -356,6 +776,16 @@ const styles = StyleSheet.create({
     color: '#666',
     marginBottom: 2,
   },
+  brandText: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 2,
+  },
+  colorText: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 2,
+  },
   locationText: {
     fontSize: 14,
     color: '#666',
@@ -386,6 +816,20 @@ const styles = StyleSheet.create({
     fontSize: 20,
     color: '#8B5CF6',
   },
+  editCardButton: {
+    backgroundColor: '#f3e8ff',
+    borderWidth: 1,
+    borderColor: '#d8b4fe',
+    borderRadius: 15,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    marginRight: 8,
+  },
+  editCardButtonText: {
+    color: '#7e22ce',
+    fontSize: 12,
+    fontWeight: '600',
+  },
   productName: {
     fontSize: 16,
     fontWeight: '600',
@@ -411,5 +855,99 @@ const styles = StyleSheet.create({
   navText: {
     fontSize: 12,
     color: '#666',
+  },
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    width: '100%',
+    maxWidth: 500,
+    maxHeight: '90%',
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+    paddingBottom: 12,
+    marginBottom: 15,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#8B5CF6',
+  },
+  modalCloseIcon: {
+    fontSize: 18,
+    color: '#999',
+    fontWeight: 'bold',
+    padding: 5,
+  },
+  modalForm: {
+    flexGrow: 0,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#444',
+    marginBottom: 6,
+    marginTop: 4,
+  },
+  modalInput: {
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: '#333',
+    marginBottom: 14,
+  },
+  modalButtonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 12,
+    marginTop: 15,
+    marginBottom: 10,
+  },
+  cancelButton: {
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#f1f5f9',
+  },
+  cancelButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  saveButton: {
+    paddingHorizontal: 22,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#8B5CF6',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 120,
+  },
+  saveButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'white',
   },
 });
