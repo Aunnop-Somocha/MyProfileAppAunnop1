@@ -141,7 +141,7 @@ app.get('/api/products', async (req, res) => {
           location_count: locationCount,
           location_text: row.location || '0 stores',
           badge_status: row.status || 'Active',
-          image_url: row.image_url || imageMap[row.name] || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200',
+          image_url: getMatchingImage(row.name, row.image_url),
           brand: row.brand || 'Nike',
           color: row.color || colorMap[row.name] || 'Standard',
           sizes: row.sizes || ''

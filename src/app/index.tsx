@@ -77,19 +77,7 @@ const cleanUrl = (url: string = '') => {
 
 const getMatchingImage = (name: string = '', url?: string) => {
   const cleaned = cleanUrl(url);
-  if (cleaned) {
-    if (cleaned === 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200') {
-      const lower = (name || '').toLowerCase();
-      if (lower.includes('force 1') || lower.includes('af1')) {
-        return 'https://images.unsplash.com/photo-1600185365483-26d7a4cc7519?w=200';
-      }
-      if (lower.includes('pegasus') || lower.includes('zoom')) {
-        return 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?w=200';
-      }
-      if (lower.includes('ultraboost') || lower.includes('adidas')) {
-        return 'https://images.unsplash.com/photo-1584735935682-2f2b69dff9d2?w=200';
-      }
-    }
+  if (cleaned && cleaned.length > 0) {
     return cleaned;
   }
   return defaultImageForProduct(name);
