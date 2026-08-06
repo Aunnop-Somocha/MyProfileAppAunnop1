@@ -51,6 +51,50 @@ const apiCall = async (endpoint: string, options: any = {}, authToken?: string) 
   return response.json();
 };
 
+const defaultImageForProduct = (name: string = '') => {
+  const lower = (name || '').toLowerCase();
+  if (lower.includes('force 1') || lower.includes('af1')) {
+    return 'https://images.unsplash.com/photo-1600185365483-26d7a4cc7519?w=200';
+  }
+  if (lower.includes('pegasus') || lower.includes('zoom')) {
+    return 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?w=200';
+  }
+  if (lower.includes('ultraboost') || lower.includes('adidas')) {
+    return 'https://images.unsplash.com/photo-1584735935682-2f2b69dff9d2?w=200';
+  }
+  return 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200';
+};
+
+const cleanUrl = (url: string = '') => {
+  if (!url || typeof url !== 'string') return '';
+  let trimmed = url.trim();
+  if (!trimmed) return '';
+  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+    trimmed = 'https://' + trimmed;
+  }
+  return trimmed;
+};
+
+const getMatchingImage = (name: string = '', url?: string) => {
+  const cleaned = cleanUrl(url);
+  if (cleaned) {
+    if (cleaned === 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200') {
+      const lower = (name || '').toLowerCase();
+      if (lower.includes('force 1') || lower.includes('af1')) {
+        return 'https://images.unsplash.com/photo-1600185365483-26d7a4cc7519?w=200';
+      }
+      if (lower.includes('pegasus') || lower.includes('zoom')) {
+        return 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?w=200';
+      }
+      if (lower.includes('ultraboost') || lower.includes('adidas')) {
+        return 'https://images.unsplash.com/photo-1584735935682-2f2b69dff9d2?w=200';
+      }
+    }
+    return cleaned;
+  }
+  return defaultImageForProduct(name);
+};
+
 export default function ProductsScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [products, setProducts] = useState<Product[]>([]);
@@ -58,6 +102,7 @@ export default function ProductsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [currentScreen, setCurrentScreen] = useState<string>('products');
+  const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
 
   // Modal & Form state (Add Product)
   const [modalVisible, setModalVisible] = useState<boolean>(false);
@@ -82,6 +127,17 @@ export default function ProductsScreen() {
   const [editLocationText, setEditLocationText] = useState('');
   const [editImageUrl, setEditImageUrl] = useState('');
 
+  // Helper to persist products locally on Web browser
+  const saveToLocalCache = (productsList: Product[]) => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        localStorage.setItem('MY_PRODUCTS_DB', JSON.stringify(productsList));
+      } catch (e) {
+        console.warn('LocalStorage save failed:', e);
+      }
+    }
+  };
+
   // fetchProducts function (As per Slide 24)
   const fetchProducts = async () => {
     try {
@@ -95,8 +151,17 @@ export default function ProductsScreen() {
         try {
           data = await apiCall('http://119.59.102.161:3049/api/products');
         } catch (err2) {
-          const response = await fetch(PRODUCTS_URL);
-          data = await response.json();
+          try {
+            data = await apiCall('http://localhost:3049/api/products');
+          } catch (err3) {
+            const savedLocal = typeof window !== 'undefined' ? localStorage.getItem('MY_PRODUCTS_DB') : null;
+            if (savedLocal) {
+              data = JSON.parse(savedLocal);
+            } else {
+              const response = await fetch(PRODUCTS_URL);
+              data = await response.json();
+            }
+          }
         }
       }
 
@@ -122,10 +187,7 @@ export default function ProductsScreen() {
         location_count: product.location_count || 0,
         location_text: product.location_text || '0 stores',
         badge_status: product.badge_status || 'Active',
-        image_url:
-          product.image_url && typeof product.image_url === 'string' && product.image_url.trim().length > 0
-            ? product.image_url.trim()
-            : 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200',
+        image_url: getMatchingImage(product.name, product.image_url),
       }));
 
       setProducts(parsedData);
@@ -173,6 +235,8 @@ export default function ProductsScreen() {
     const locText = newLocationText.trim() || '3 stores';
     const locCount = parseInt((locText.match(/\d+/) || ['3'])[0], 10);
 
+    const imgToSave = cleanUrl(newImageUrl) || defaultImageForProduct(newName.trim());
+
     const newProductPayload = {
       name: newName.trim(),
       brand: newBrand.trim() || 'Nike',
@@ -183,7 +247,7 @@ export default function ProductsScreen() {
       location_count: locCount,
       location_text: locText,
       badge_status: 'Active',
-      image_url: newImageUrl.trim() || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200',
+      image_url: imgToSave,
     };
 
     try {
@@ -203,7 +267,14 @@ export default function ProductsScreen() {
             body: JSON.stringify(newProductPayload),
           });
         } catch (err2) {
-          console.log('API call failed, adding product to local state fallback');
+          try {
+            apiResult = await apiCall('http://localhost:3049/api/products', {
+              method: 'POST',
+              body: JSON.stringify(newProductPayload),
+            });
+          } catch (err3) {
+            console.log('API call failed, saving to local cache fallback');
+          }
         }
       }
 
@@ -212,8 +283,12 @@ export default function ProductsScreen() {
         ...newProductPayload,
       };
 
-      // Add new product to top of products list
-      setProducts((prev) => [createdProduct, ...prev]);
+      // Add new product to top of products list and persist
+      setProducts((prev) => {
+        const updated = [createdProduct, ...prev];
+        saveToLocalCache(updated);
+        return updated;
+      });
 
       Alert.alert('Success', 'Product added successfully to database!');
       setModalVisible(false);
@@ -263,6 +338,8 @@ export default function ProductsScreen() {
     const locText = editLocationText.trim() || '3 stores';
     const locCount = parseInt((locText.match(/\d+/) || ['3'])[0], 10);
 
+    const imgToSave = cleanUrl(editImageUrl) || defaultImageForProduct(editName.trim());
+
     const updatedPayload = {
       name: editName.trim(),
       brand: editBrand.trim() || 'Nike',
@@ -273,7 +350,7 @@ export default function ProductsScreen() {
       location_count: locCount,
       location_text: locText,
       badge_status: editingProduct.badge_status || 'Active',
-      image_url: editImageUrl.trim() || editingProduct.image_url || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200',
+      image_url: imgToSave,
     };
 
     try {
@@ -293,16 +370,26 @@ export default function ProductsScreen() {
             body: JSON.stringify(updatedPayload),
           });
         } catch (err2) {
-          console.log('API PUT call failed, updating local state fallback');
+          try {
+            await apiCall(`http://localhost:3049/api/products/${targetId}`, {
+              method: 'PUT',
+              body: JSON.stringify(updatedPayload),
+            });
+          } catch (err3) {
+            console.log('API PUT call failed, saving to local cache fallback');
+          }
         }
       }
 
-      // Update products state in React UI
-      setProducts((prev) =>
-        prev.map((item) =>
+      // Update products state in React UI & local cache
+      setProducts((prev) => {
+        const updated = prev.map((item) =>
           item.id === targetId ? { ...item, ...updatedPayload } : item
-        )
-      );
+        );
+        saveToLocalCache(updated);
+        return updated;
+      });
+      setFailedImages((prev) => ({ ...prev, [targetId]: false }));
 
       Alert.alert('Success', 'Product details updated successfully in database!');
       setEditModalVisible(false);
@@ -365,11 +452,13 @@ export default function ProductsScreen() {
           {filteredProducts.map((product) => (
             <View key={product.id} style={styles.productCard}>
               <Image
-                source={
-                  typeof product.image_url === 'string'
-                    ? { uri: product.image_url }
-                    : product.image_url
-                }
+                key={product.image_url || product.id}
+                source={{
+                  uri: failedImages[product.id]
+                    ? defaultImageForProduct(product.name)
+                    : getMatchingImage(product.name, product.image_url),
+                }}
+                onError={() => setFailedImages((prev) => ({ ...prev, [product.id]: true }))}
                 style={styles.productImage}
                 resizeMode="cover"
               />
@@ -505,6 +594,15 @@ export default function ProductsScreen() {
                   onChangeText={setNewImageUrl}
                 />
 
+                <View style={styles.previewContainer}>
+                  <Text style={styles.previewLabel}>Image Preview:</Text>
+                  <Image
+                    source={{ uri: cleanUrl(newImageUrl) || defaultImageForProduct(newName) }}
+                    style={styles.modalPreviewImage}
+                    resizeMode="cover"
+                  />
+                </View>
+
                 <View style={styles.modalButtonContainer}>
                   <TouchableOpacity
                     style={styles.cancelButton}
@@ -610,6 +708,15 @@ export default function ProductsScreen() {
                   value={editImageUrl}
                   onChangeText={setEditImageUrl}
                 />
+
+                <View style={styles.previewContainer}>
+                  <Text style={styles.previewLabel}>Image Preview:</Text>
+                  <Image
+                    source={{ uri: cleanUrl(editImageUrl) || defaultImageForProduct(editName) }}
+                    style={styles.modalPreviewImage}
+                    resizeMode="cover"
+                  />
+                </View>
 
                 <View style={styles.modalButtonContainer}>
                   <TouchableOpacity
@@ -949,5 +1056,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: 'white',
+  },
+  // Preview Image Styles
+  previewContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 14,
+    backgroundColor: '#f8f9fa',
+    padding: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  previewLabel: {
+    fontSize: 13,
+    color: '#666',
+    marginRight: 10,
+    fontWeight: '500',
+  },
+  modalPreviewImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 6,
+    backgroundColor: '#eee',
   },
 });

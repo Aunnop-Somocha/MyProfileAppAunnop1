@@ -31,11 +31,20 @@ const pool = mysql.createPool({
   try {
     const conn = await pool.getConnection();
     console.log('Connected to MySQL:', process.env.DB_NAME);
+    const alterQueries = [
+      "ALTER TABLE products ADD COLUMN brand VARCHAR(100)",
+      "ALTER TABLE products ADD COLUMN color VARCHAR(100)",
+      "ALTER TABLE products ADD COLUMN image_url TEXT",
+      "ALTER TABLE Inventory ADD COLUMN brand VARCHAR(100)",
+      "ALTER TABLE Inventory ADD COLUMN color VARCHAR(100)",
+      "ALTER TABLE Inventory ADD COLUMN image_url TEXT"
+    ];
+    for (const q of alterQueries) {
+      try { await conn.query(q); } catch (e) { /* column exists */ }
+    }
     conn.release();
   } catch (err) {
-    console.error('MySQL Failed:', err.message);
-    // Commented out to prevent the server from crashing when database is unreachable
-    // process.exit(1);
+    console.error('MySQL Connection Warning:', err.message);
   }
 })();
 
@@ -80,9 +89,17 @@ app.get('/api/products', async (req, res) => {
       'Nike Air Zoom Pegasus 39': 'Lime Green / Black'
     };
 
+    const getMatchingImage = (name, url) => {
+      if (url && typeof url === 'string' && url.trim().length > 0) return url.trim();
+      const lower = (name || '').toLowerCase();
+      if (lower.includes('force 1') || lower.includes('af1')) return 'https://images.unsplash.com/photo-1600185365483-26d7a4cc7519?w=200';
+      if (lower.includes('pegasus') || lower.includes('zoom')) return 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?w=200';
+      return imageMap[name] || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200';
+    };
+
     const mappedRows = rows.map(row => ({
       ...row,
-      image_url: row.image_url || imageMap[row.name] || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200',
+      image_url: getMatchingImage(row.name, row.image_url),
       brand: row.brand || (row.name && row.name.startsWith('Nike') ? 'Nike' : 'Nike'),
       color: row.color || colorMap[row.name] || 'Standard'
     }));

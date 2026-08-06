@@ -57,12 +57,15 @@ async function initDB() {
       )
     `);
 
-    // Ensure columns exist if table was previously created without brand/color
+    // Ensure columns exist if table was previously created without brand/color/image_url
     try {
       await connection.query(`ALTER TABLE products ADD COLUMN brand VARCHAR(100)`);
     } catch (e) { /* Column may already exist */ }
     try {
       await connection.query(`ALTER TABLE products ADD COLUMN color VARCHAR(100)`);
+    } catch (e) { /* Column may already exist */ }
+    try {
+      await connection.query(`ALTER TABLE products ADD COLUMN image_url TEXT`);
     } catch (e) { /* Column may already exist */ }
 
     // 4. Seed products if empty
