@@ -4,6 +4,7 @@ import {
   Alert,
   Image,
   Modal,
+  Platform,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -19,6 +20,8 @@ interface Product {
   name: string;
   brand?: string;
   color?: string;
+  price?: number | string;
+  sizes?: string;
   stock: number;
   stock_text: string;
   category: string;
@@ -26,6 +29,14 @@ interface Product {
   location_text: string;
   badge_status: string;
   image_url: string;
+}
+
+interface UserProfile {
+  id: number | string;
+  username: string;
+  role: 'admin' | 'user';
+  name: string;
+  token?: string;
 }
 
 const PRODUCTS_URL = 'https://raw.githubusercontent.com/Aunnop-Somocha/MyProfileAppAunnop1/refs/heads/master/products.json';
@@ -98,6 +109,8 @@ export default function ProductsScreen() {
   const [newName, setNewName] = useState('');
   const [newBrand, setNewBrand] = useState('');
   const [newColor, setNewColor] = useState('');
+  const [newPrice, setNewPrice] = useState('3500');
+  const [newSizes, setNewSizes] = useState('US 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12');
   const [newCategory, setNewCategory] = useState('Shoes');
   const [newStock, setNewStock] = useState('');
   const [newLocationText, setNewLocationText] = useState('3 stores');
@@ -110,10 +123,38 @@ export default function ProductsScreen() {
   const [editName, setEditName] = useState('');
   const [editBrand, setEditBrand] = useState('');
   const [editColor, setEditColor] = useState('');
+  const [editPrice, setEditPrice] = useState('');
+  const [editSizes, setEditSizes] = useState('');
   const [editCategory, setEditCategory] = useState('');
   const [editStock, setEditStock] = useState('');
   const [editLocationText, setEditLocationText] = useState('');
   const [editImageUrl, setEditImageUrl] = useState('');
+
+  // Modal & Delete state (Delete Product Popup)
+  const [deleteModalVisible, setDeleteModalVisible] = useState<boolean>(false);
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
+
+  // User Auth & Role State (Default null to force Login Screen first)
+  const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const saved = localStorage.getItem('MY_AUTH_USER');
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch (e) {}
+      }
+    }
+    return null; // Force Login Screen on initial entry
+  });
+
+  const [loginModalVisible, setLoginModalVisible] = useState<boolean>(false);
+  const [selectedLoginRole, setSelectedLoginRole] = useState<'admin' | 'user'>('admin');
+  const [loginUsername, setLoginUsername] = useState<string>('admin');
+  const [loginPassword, setLoginPassword] = useState<string>('');
+  const [loggingIn, setLoggingIn] = useState<boolean>(false);
+
+  const isAdmin = currentUser?.role === 'admin';
 
   // Helper to persist products locally on Web browser
   const saveToLocalCache = (productsList: Product[]) => {
@@ -153,7 +194,8 @@ export default function ProductsScreen() {
         }
       }
 
-      if (!Array.isArray(data)) {
+      const rawRows = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : null;
+      if (!rawRows) {
         throw new Error('Invalid data format received');
       }
 
@@ -163,12 +205,14 @@ export default function ProductsScreen() {
         'Nike Air Zoom Pegasus 39': 'Lime Green / Black',
       };
 
-      const parsedData = data.map((product: any) => ({
+      const parsedData = rawRows.map((product: any) => ({
         ...product,
         id: String(product.id || Math.random()),
         name: product.name || '',
         brand: product.brand || 'Nike',
         color: product.color || defaultColors[product.name] || 'Standard',
+        price: product.price !== undefined && product.price !== null ? Number(product.price) : 3500,
+        sizes: product.sizes || 'US 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12',
         stock: product.stock || 0,
         stock_text: product.stock_text || `${product.stock || 0} in stock`,
         category: product.category || 'Shoes',
@@ -220,6 +264,8 @@ export default function ProductsScreen() {
     }
 
     const stockVal = parseInt(newStock, 10) || 0;
+    const priceVal = parseFloat(newPrice) || 3500;
+    const sizesVal = newSizes.trim() || 'US 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12';
     const locText = newLocationText.trim() || '3 stores';
     const locCount = parseInt((locText.match(/\d+/) || ['3'])[0], 10);
 
@@ -229,6 +275,8 @@ export default function ProductsScreen() {
       name: newName.trim(),
       brand: newBrand.trim() || 'Nike',
       color: newColor.trim() || 'Standard',
+      price: priceVal,
+      sizes: sizesVal,
       category: newCategory.trim() || 'Shoes',
       stock: stockVal,
       stock_text: `${stockVal} in stock`,
@@ -285,6 +333,8 @@ export default function ProductsScreen() {
       setNewName('');
       setNewBrand('');
       setNewColor('');
+      setNewPrice('3500');
+      setNewSizes('US 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12');
       setNewCategory('Shoes');
       setNewStock('');
       setNewLocationText('3 stores');
@@ -303,6 +353,8 @@ export default function ProductsScreen() {
     setEditName(product.name || '');
     setEditBrand(product.brand || 'Nike');
     setEditColor(product.color || 'Standard');
+    setEditPrice(String(product.price ?? 3500));
+    setEditSizes(product.sizes || 'US 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12');
     setEditCategory(product.category || 'Shoes');
     setEditStock(String(product.stock ?? 0));
     setEditLocationText(product.location_text || '3 stores');
@@ -323,6 +375,8 @@ export default function ProductsScreen() {
     }
 
     const stockVal = parseInt(editStock, 10) || 0;
+    const priceVal = parseFloat(editPrice) || 3500;
+    const sizesVal = editSizes.trim() || 'US 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12';
     const locText = editLocationText.trim() || '3 stores';
     const locCount = parseInt((locText.match(/\d+/) || ['3'])[0], 10);
 
@@ -332,6 +386,8 @@ export default function ProductsScreen() {
       name: editName.trim(),
       brand: editBrand.trim() || 'Nike',
       color: editColor.trim() || 'Standard',
+      price: priceVal,
+      sizes: sizesVal,
       category: editCategory.trim() || 'Shoes',
       stock: stockVal,
       stock_text: `${stockVal} in stock`,
@@ -390,6 +446,136 @@ export default function ProductsScreen() {
     }
   };
 
+  // Open Delete Confirmation Popup (Slide 8 frontend style)
+  const confirmDeleteProduct = (product: Product) => {
+    setProductToDelete(product);
+    setDeleteModalVisible(true);
+  };
+
+  // Perform Delete API call (Slide 8 frontend handling)
+  const handleDeleteProduct = async (product: Product) => {
+    if (!product) return;
+    setDeletingProductId(product.id);
+    const targetId = product.id;
+
+    try {
+      // Call DELETE /api/products/:id API
+      try {
+        await apiCall(`${BACKEND_URL}/${targetId}`, { method: 'DELETE' });
+      } catch (err1) {
+        try {
+          await apiCall(`http://119.59.102.161:3049/api/products/${targetId}`, { method: 'DELETE' });
+        } catch (err2) {
+          try {
+            await apiCall(`http://localhost:3049/api/products/${targetId}`, { method: 'DELETE' });
+          } catch (err3) {
+            console.log('API DELETE call failed, updating local cache fallback');
+          }
+        }
+      }
+
+      // Filter out deleted product from list
+      setProducts((prev) => {
+        const updated = prev.filter((p) => p.id !== product.id);
+        saveToLocalCache(updated);
+        return updated;
+      });
+
+      if (Platform.OS === 'web') {
+        if (typeof window !== 'undefined') {
+          window.alert(`Product "${product.name}" deleted successfully.`);
+        }
+      } else {
+        Alert.alert('Success', `Product "${product.name}" deleted successfully.`);
+      }
+    } catch (error: any) {
+      console.error('Error deleting product:', error);
+      Alert.alert('Delete failed', error?.message || 'Unable to delete product.');
+    } finally {
+      setDeletingProductId(null);
+      setDeleteModalVisible(false);
+      setProductToDelete(null);
+    }
+  };
+
+  // Login Handler (API / Fallback)
+  const handleLogin = async (customUser?: string, customPass?: string) => {
+    const uName = customUser || loginUsername.trim();
+    const uPass = customPass || loginPassword.trim();
+
+    if (!uName || !uPass) {
+      Alert.alert('Validation Error', 'Please enter username and password');
+      return;
+    }
+
+    try {
+      setLoggingIn(true);
+      let data: any = null;
+
+      try {
+        data = await apiCall(BACKEND_URL.replace('/products', '/login'), {
+          method: 'POST',
+          body: JSON.stringify({ username: uName, password: uPass }),
+        });
+      } catch (err1) {
+        try {
+          data = await apiCall('http://119.59.102.161:3049/api/login', {
+            method: 'POST',
+            body: JSON.stringify({ username: uName, password: uPass }),
+          });
+        } catch (err2) {
+          try {
+            data = await apiCall('http://localhost:3049/api/login', {
+              method: 'POST',
+              body: JSON.stringify({ username: uName, password: uPass }),
+            });
+          } catch (err3) {
+            // Local fallback simulation if server is unreachable
+            if (uName === 'admin' && uPass === 'admin123') {
+              data = { token: 'mock-admin-token', user: { id: 1, username: 'admin', role: 'admin', name: 'Administrator' } };
+            } else if (uName === 'user' && uPass === 'user123') {
+              data = { token: 'mock-user-token', user: { id: 2, username: 'user', role: 'user', name: 'Normal User' } };
+            } else {
+              throw new Error('Invalid username or password');
+            }
+          }
+        }
+      }
+
+      const userProfile: UserProfile = {
+        ...data.user,
+        token: data.token,
+      };
+
+      setCurrentUser(userProfile);
+      if (userProfile.token) {
+        setAuthToken(userProfile.token);
+      }
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.setItem('MY_AUTH_USER', JSON.stringify(userProfile));
+      }
+
+      Alert.alert('Success', `Logged in successfully as ${userProfile.role.toUpperCase()} (${userProfile.name || userProfile.username})`);
+      setLoginModalVisible(false);
+      setLoginUsername('');
+      setLoginPassword('');
+    } catch (err: any) {
+      console.error('Login error:', err);
+      Alert.alert('Login Failed', err.message || 'Invalid username or password');
+    } finally {
+      setLoggingIn(false);
+    }
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setAuthToken(null);
+    if (typeof window !== 'undefined' && window.localStorage) {
+      localStorage.removeItem('MY_AUTH_USER');
+    }
+    Alert.alert('Logged Out', 'You have logged out.');
+  };
+
   const filteredProducts = products.filter(
     (product) =>
       product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -397,6 +583,135 @@ export default function ProductsScreen() {
       (product.brand && product.brand.toLowerCase().includes(searchQuery.toLowerCase())) ||
       (product.color && product.color.toLowerCase().includes(searchQuery.toLowerCase()))
   );
+
+  // Forced Login Screen if not logged in (Password Entry Required)
+  if (!currentUser) {
+    return (
+      <SafeAreaView style={styles.loginPageContainer}>
+        <StatusBar barStyle="dark-content" backgroundColor="#f1f5f9" />
+        <ScrollView contentContainerStyle={styles.loginScrollContainer} showsVerticalScrollIndicator={false}>
+          <View style={styles.loginCard}>
+            <View style={styles.loginHeaderBox}>
+              <View style={styles.loginLogoCircle}>
+                <Text style={styles.loginLogoIcon}>👟</Text>
+              </View>
+              <Text style={styles.loginAppTitle}>Product Management App</Text>
+              <Text style={styles.loginAppSubTitle}>Please select target role and enter password to sign in</Text>
+              <View style={styles.requiredBadge}>
+                <Text style={styles.requiredBadgeText}>🔒 Password Required</Text>
+              </View>
+            </View>
+
+            {/* Role Selection Buttons */}
+            <Text style={styles.selectAccountLabel}>1. Select Target Login Role:</Text>
+            <View style={styles.roleTabContainer}>
+              <TouchableOpacity
+                style={[
+                  styles.roleTabButton,
+                  selectedLoginRole === 'admin' ? styles.roleTabActive : styles.roleTabInactive,
+                ]}
+                onPress={() => {
+                  setSelectedLoginRole('admin');
+                  setLoginUsername('admin');
+                  setLoginPassword('');
+                }}
+              >
+                <Text style={styles.roleTabIcon}>👑</Text>
+                <Text
+                  style={[
+                    styles.roleTabText,
+                    selectedLoginRole === 'admin' ? styles.roleTabTextActive : styles.roleTabTextInactive,
+                  ]}
+                >
+                  Admin Account
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.roleTabButton,
+                  selectedLoginRole === 'user' ? styles.roleTabActive : styles.roleTabInactive,
+                ]}
+                onPress={() => {
+                  setSelectedLoginRole('user');
+                  setLoginUsername('user');
+                  setLoginPassword('');
+                }}
+              >
+                <Text style={styles.roleTabIcon}>👤</Text>
+                <Text
+                  style={[
+                    styles.roleTabText,
+                    selectedLoginRole === 'user' ? styles.roleTabTextActive : styles.roleTabTextInactive,
+                  ]}
+                >
+                  User Account
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Role Permissions Hint Box */}
+            <View
+              style={[
+                styles.roleHintBox,
+                selectedLoginRole === 'admin' ? styles.adminHintBox : styles.userHintBox,
+              ]}
+            >
+              <Text style={styles.roleHintTitle}>
+                {selectedLoginRole === 'admin' ? '👑 Admin Role Privileges:' : '👤 User Role Privileges:'}
+              </Text>
+              <Text style={styles.roleHintText}>
+                {selectedLoginRole === 'admin'
+                  ? '✓ Can view, search, ADD new products, EDIT prices/sizes, and DELETE products.'
+                  : '✓ Can view and search products only. (Add, Edit, and Delete actions are restricted)'}
+              </Text>
+            </View>
+
+            {/* Password Login Form */}
+            <Text style={styles.selectAccountLabel}>2. Enter Credentials & Password:</Text>
+            <View style={styles.customLoginForm}>
+              <Text style={styles.inputLabel}>Username *</Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Enter username"
+                placeholderTextColor="#aaa"
+                value={loginUsername}
+                onChangeText={setLoginUsername}
+                autoCapitalize="none"
+              />
+
+              <Text style={styles.inputLabel}>Password *</Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Enter password"
+                placeholderTextColor="#aaa"
+                secureTextEntry={true}
+                value={loginPassword}
+                onChangeText={setLoginPassword}
+              />
+
+              <TouchableOpacity
+                style={[
+                  styles.loginSubmitButton,
+                  loggingIn && { opacity: 0.7 },
+                ]}
+                onPress={() => handleLogin(loginUsername, loginPassword)}
+                disabled={loggingIn}
+              >
+                {loggingIn ? (
+                  <ActivityIndicator color="white" size="small" />
+                ) : (
+                  <Text style={styles.loginSubmitButtonText}>
+                    Sign In as {selectedLoginRole.toUpperCase()}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <>
@@ -408,10 +723,26 @@ export default function ProductsScreen() {
           <TouchableOpacity style={styles.menuButton}>
             <Text style={styles.menuIcon}>☰</Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>product</Text>
-          <TouchableOpacity style={styles.profileButton}>
-            <Text style={styles.profileIcon}>👤</Text>
-          </TouchableOpacity>
+          <View style={{ alignItems: 'center' }}>
+            <Text style={styles.headerTitle}>SNEAKER VAULT</Text>
+            <Text style={styles.roleBadgeHeader}>
+              {isAdmin ? '👑 ADMIN MODE' : '👤 USER MODE'}
+            </Text>
+          </View>
+          <View style={styles.headerRightActions}>
+            <TouchableOpacity
+              style={[
+                styles.profileButton,
+                { backgroundColor: '#000000' },
+              ]}
+              onPress={() => setLoginModalVisible(true)}
+            >
+              <Text style={styles.profileIcon}>{isAdmin ? '👑' : '👤'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerLogoutBtn} onPress={handleLogout}>
+              <Text style={styles.headerLogoutText}>Log Out</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Search Container */}
@@ -427,9 +758,11 @@ export default function ProductsScreen() {
               onChangeText={setSearchQuery}
             />
           </View>
-          <TouchableOpacity style={styles.addButton} onPress={() => setModalVisible(true)}>
-            <Text style={styles.addButtonText}>+ Add Product</Text>
-          </TouchableOpacity>
+          {isAdmin && (
+            <TouchableOpacity style={styles.addButton} onPress={() => setModalVisible(true)}>
+              <Text style={styles.addButtonText}>+ Add Product</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={styles.filterButton}>
             <Text style={styles.filterText}>Filter ▼</Text>
           </TouchableOpacity>
@@ -439,44 +772,69 @@ export default function ProductsScreen() {
         <ScrollView style={styles.productsList} showsVerticalScrollIndicator={false}>
           {filteredProducts.map((product) => (
             <View key={product.id} style={styles.productCard}>
-              <Image
-                key={product.image_url || product.id}
-                source={{
-                  uri: failedImages[product.id]
-                    ? defaultImageForProduct(product.name)
-                    : getMatchingImage(product.name, product.image_url),
-                }}
-                onError={() => setFailedImages((prev) => ({ ...prev, [product.id]: true }))}
-                style={styles.productImage}
-                resizeMode="cover"
-              />
-              <View style={styles.productInfo}>
-                <View style={styles.productDetails}>
-                  <Text style={styles.stockText}>Stock: {product.stock_text}</Text>
-                  <Text style={styles.categoryText}>Category: {product.category}</Text>
-                  <Text style={styles.brandText}>Brand: {product.brand || 'Nike'}</Text>
-                  <Text style={styles.colorText}>Color: {product.color || 'Standard'}</Text>
-                  <Text style={styles.locationText}>Location: {product.location_text}</Text>
-                </View>
-                <View style={styles.productActions}>
-                  <TouchableOpacity
-                    style={styles.editCardButton}
-                    onPress={() => openEditModal(product)}
-                  >
-                    <Text style={styles.editCardButtonText}>✏️ Edit</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.statusButton}>
-                    <Text style={styles.statusText}>{product.badge_status}</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.moreButton}
-                    onPress={() => openEditModal(product)}
-                  >
-                    <Text style={styles.moreIcon}>›</Text>
-                  </TouchableOpacity>
+              <View style={styles.cardHeaderRow}>
+                <Image
+                  key={product.image_url || product.id}
+                  source={{
+                    uri: failedImages[product.id]
+                      ? defaultImageForProduct(product.name)
+                      : getMatchingImage(product.name, product.image_url),
+                  }}
+                  onError={() => setFailedImages((prev) => ({ ...prev, [product.id]: true }))}
+                  style={styles.productImage}
+                  resizeMode="cover"
+                />
+                <View style={styles.productMainMeta}>
+                  <View style={styles.brandBadgeRow}>
+                    <Text style={styles.brandPillText}>{(product.brand || 'Nike').toUpperCase()}</Text>
+                    <Text style={styles.categoryPillText}>{product.category}</Text>
+                  </View>
+                  <Text style={styles.productName}>{product.name}</Text>
+                  <Text style={styles.priceText}>฿{Number(product.price || 3500).toLocaleString('th-TH')}</Text>
                 </View>
               </View>
-              <Text style={styles.productName}>{product.name}</Text>
+
+              <View style={styles.sizePillContainer}>
+                <Text style={styles.sizeLabel}>SIZES:</Text>
+                <Text style={styles.sizePillText}>
+                  {product.sizes || 'US 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12'}
+                </Text>
+              </View>
+
+              <View style={styles.cardFooterRow}>
+                <View style={styles.metaInfoGroup}>
+                  <Text style={styles.stockBadgeText}>📦 {product.stock_text}</Text>
+                  <Text style={styles.colorBadgeText}>🎨 {product.color || 'Standard'}</Text>
+                  <Text style={styles.locationBadgeText}>📍 {product.location_text}</Text>
+                </View>
+
+                <View style={styles.productActions}>
+                  {isAdmin && (
+                    <TouchableOpacity
+                      style={styles.editCardButton}
+                      onPress={() => openEditModal(product)}
+                    >
+                      <Text style={styles.editCardButtonText}>✏️ Edit</Text>
+                    </TouchableOpacity>
+                  )}
+                  {isAdmin && (
+                    <TouchableOpacity
+                      style={[styles.deleteCardButton, deletingProductId === product.id && { opacity: 0.5 }]}
+                      onPress={() => confirmDeleteProduct(product)}
+                      disabled={deletingProductId === product.id}
+                    >
+                      {deletingProductId === product.id ? (
+                        <ActivityIndicator size="small" color="#e11d48" />
+                      ) : (
+                        <Text style={styles.deleteCardButtonText}>🗑️ Delete</Text>
+                      )}
+                    </TouchableOpacity>
+                  )}
+                  <View style={styles.statusBadgePill}>
+                    <Text style={styles.statusText}>{product.badge_status}</Text>
+                  </View>
+                </View>
+              </View>
             </View>
           ))}
         </ScrollView>
@@ -487,17 +845,24 @@ export default function ProductsScreen() {
             <Text style={styles.navIcon}>🏠</Text>
             <Text style={styles.navText}>Home</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.navItem} onPress={() => setModalVisible(true)}>
-            <Text style={styles.navIcon}>➕</Text>
-            <Text style={styles.navText}>Add</Text>
-          </TouchableOpacity>
+          {isAdmin ? (
+            <TouchableOpacity style={styles.navItem} onPress={() => setModalVisible(true)}>
+              <Text style={styles.navIcon}>➕</Text>
+              <Text style={styles.navText}>Add</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={styles.navItem} onPress={() => setLoginModalVisible(true)}>
+              <Text style={styles.navIcon}>🔒</Text>
+              <Text style={styles.navText}>Login</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={styles.navItem}>
             <Text style={styles.navIcon}>📦</Text>
             <Text style={[styles.navText, { color: '#8B5CF6' }]}>Products</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.navItem}>
-            <Text style={styles.navIcon}>📂</Text>
-            <Text style={styles.navText}>Categories</Text>
+          <TouchableOpacity style={styles.navItem} onPress={() => setLoginModalVisible(true)}>
+            <Text style={styles.navIcon}>👤</Text>
+            <Text style={styles.navText}>{currentUser ? currentUser.role.toUpperCase() : 'Account'}</Text>
           </TouchableOpacity>
         </View>
 
@@ -543,6 +908,25 @@ export default function ProductsScreen() {
                   placeholderTextColor="#aaa"
                   value={newColor}
                   onChangeText={setNewColor}
+                />
+
+                <Text style={styles.inputLabel}>Price (฿) *</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="e.g. 3500"
+                  placeholderTextColor="#aaa"
+                  keyboardType="numeric"
+                  value={newPrice}
+                  onChangeText={setNewPrice}
+                />
+
+                <Text style={styles.inputLabel}>Shoe Sizes (US 7 - 12) *</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="e.g. US 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12"
+                  placeholderTextColor="#aaa"
+                  value={newSizes}
+                  onChangeText={setNewSizes}
                 />
 
                 <Text style={styles.inputLabel}>Category</Text>
@@ -660,6 +1044,25 @@ export default function ProductsScreen() {
                   onChangeText={setEditColor}
                 />
 
+                <Text style={styles.inputLabel}>Price (฿) *</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="e.g. 3500"
+                  placeholderTextColor="#aaa"
+                  keyboardType="numeric"
+                  value={editPrice}
+                  onChangeText={setEditPrice}
+                />
+
+                <Text style={styles.inputLabel}>Shoe Sizes (US 7 - 12) *</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  placeholder="e.g. US 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12"
+                  placeholderTextColor="#aaa"
+                  value={editSizes}
+                  onChangeText={setEditSizes}
+                />
+
                 <Text style={styles.inputLabel}>Category</Text>
                 <TextInput
                   style={styles.modalInput}
@@ -730,6 +1133,136 @@ export default function ProductsScreen() {
             </View>
           </View>
         </Modal>
+        {/* Delete Confirmation Popup Modal */}
+        <Modal
+          animationType="fade"
+          transparent={true}
+          visible={deleteModalVisible}
+          onRequestClose={() => {
+            if (!deletingProductId) {
+              setDeleteModalVisible(false);
+              setProductToDelete(null);
+            }
+          }}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.deleteModalCard}>
+              <View style={styles.deleteIconContainer}>
+                <Text style={styles.deleteIconText}>🗑️</Text>
+              </View>
+              <Text style={styles.deleteModalTitle}>Confirm Delete Product</Text>
+              <Text style={styles.deleteModalText}>
+                {productToDelete
+                  ? `Are you sure you want to delete "${productToDelete.name}"? This action cannot be undone.`
+                  : 'Are you sure you want to delete this product? This action cannot be undone.'}
+              </Text>
+              <View style={styles.deleteModalButtons}>
+                <TouchableOpacity
+                  style={styles.deleteCancelBtn}
+                  onPress={() => {
+                    setDeleteModalVisible(false);
+                    setProductToDelete(null);
+                  }}
+                  disabled={deletingProductId !== null}
+                >
+                  <Text style={styles.deleteCancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.deleteConfirmBtn, deletingProductId !== null && { opacity: 0.7 }]}
+                  onPress={() => productToDelete && handleDeleteProduct(productToDelete)}
+                  disabled={deletingProductId !== null}
+                >
+                  {deletingProductId !== null ? (
+                    <ActivityIndicator color="white" size="small" />
+                  ) : (
+                    <Text style={styles.deleteConfirmBtnText}>Delete Product</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+        {/* User Login Modal */}
+        <Modal
+          animationType="fade"
+          transparent={true}
+          visible={loginModalVisible}
+          onRequestClose={() => setLoginModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.loginModalCard}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Authentication & Account Role</Text>
+                <TouchableOpacity onPress={() => setLoginModalVisible(false)}>
+                  <Text style={styles.modalCloseIcon}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              {currentUser ? (
+                <View style={styles.currentProfileBox}>
+                  <Text style={styles.currentProfileTitle}>Logged In As:</Text>
+                  <View style={styles.profileBadgeRow}>
+                    <Text style={[styles.profileRoleBadge, currentUser.role === 'admin' ? styles.adminBadge : styles.userBadge]}>
+                      {currentUser.role === 'admin' ? '👑 ADMIN' : '👤 USER'}
+                    </Text>
+                    <Text style={styles.profileNameText}>{currentUser.name || currentUser.username}</Text>
+                  </View>
+                  <Text style={styles.profilePermissionsText}>
+                    {currentUser.role === 'admin'
+                      ? '✅ Admin Privileges: Add Product, Edit Product, and Delete Product allowed'
+                      : '👁️ Normal User: View and Search Products only (Add/Edit/Delete restricted)'}
+                  </Text>
+                  <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+                    <Text style={styles.logoutButtonText}>🚪 Log Out</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+
+              <Text style={styles.loginSubTitle}>Sign In Credentials:</Text>
+
+              <Text style={styles.inputLabel}>Username</Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="admin or user"
+                placeholderTextColor="#aaa"
+                value={loginUsername}
+                onChangeText={setLoginUsername}
+                autoCapitalize="none"
+              />
+
+              <Text style={styles.inputLabel}>Password</Text>
+              <TextInput
+                style={styles.modalInput}
+                placeholder="Password"
+                placeholderTextColor="#aaa"
+                secureTextEntry={true}
+                value={loginPassword}
+                onChangeText={setLoginPassword}
+              />
+
+              <View style={styles.modalButtonContainer}>
+                <TouchableOpacity
+                  style={styles.cancelButton}
+                  onPress={() => setLoginModalVisible(false)}
+                >
+                  <Text style={styles.cancelButtonText}>Close</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.saveButton, loggingIn && { opacity: 0.7 }]}
+                  onPress={() => handleLogin()}
+                  disabled={loggingIn}
+                >
+                  {loggingIn ? (
+                    <ActivityIndicator color="white" size="small" />
+                  ) : (
+                    <Text style={styles.saveButtonText}>Sign In</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
       </SafeAreaView>
     </>
   );
@@ -738,39 +1271,51 @@ export default function ProductsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f8f9fa',
+    backgroundColor: '#FFFFFF',
   },
-  // Header Styles
+  // Pure White Minimalist Header Styles
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: 'white',
+    paddingHorizontal: 24,
+    paddingVertical: 18,
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderBottomColor: '#e9ecef',
+    borderBottomColor: '#F3F4F6',
   },
   menuButton: {
-    width: 30,
-    height: 30,
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#FAFAFA',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
     justifyContent: 'center',
     alignItems: 'center',
   },
   menuIcon: {
-    fontSize: 18,
-    color: '#333',
+    fontSize: 16,
+    color: '#111827',
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#8B5CF6',
+    fontSize: 19,
+    fontWeight: '900',
+    color: '#000000',
+    letterSpacing: 2,
+  },
+  roleBadgeHeader: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#6B7280',
+    letterSpacing: 1,
+    marginTop: 2,
   },
   profileButton: {
-    width: 30,
-    height: 30,
-    backgroundColor: '#8B5CF6',
-    borderRadius: 15,
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: '#000000',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -782,153 +1327,611 @@ const styles = StyleSheet.create({
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    backgroundColor: 'white',
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderBottomColor: '#e9ecef',
+    borderBottomColor: '#F3F4F6',
   },
   searchBar: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    marginRight: 10,
+    backgroundColor: '#FAFAFA',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    marginRight: 12,
   },
   searchIcon: {
-    fontSize: 16,
-    color: '#999',
-    marginRight: 10,
+    fontSize: 15,
+    color: '#9CA3AF',
+    marginRight: 8,
   },
   searchInput: {
     flex: 1,
-    paddingVertical: 10,
-    fontSize: 16,
-    color: '#333',
+    paddingVertical: 11,
+    fontSize: 14,
+    color: '#111827',
+    fontWeight: '500',
   },
   addButton: {
-    backgroundColor: '#8B5CF6',
-    borderRadius: 8,
-    paddingHorizontal: 15,
-    paddingVertical: 10,
+    backgroundColor: '#000000',
+    borderRadius: 12,
+    paddingHorizontal: 18,
+    paddingVertical: 12,
     marginRight: 10,
   },
   addButtonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.3,
   },
   filterButton: {
-    paddingHorizontal: 10,
-    paddingVertical: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
   filterText: {
-    color: '#8B5CF6',
-    fontSize: 14,
-    fontWeight: '500',
+    color: '#374151',
+    fontSize: 13,
+    fontWeight: '600',
   },
-  // Product List Styles
+  // Pure White Minimalist Sneaker Product List Styles
   productsList: {
     flex: 1,
     padding: 20,
+    backgroundColor: '#FFFFFF',
   },
   productCard: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 15,
-    marginBottom: 15,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOpacity: 0.03,
+    shadowRadius: 8,
+    elevation: 1,
+  },
+  cardHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 18,
+    marginBottom: 16,
   },
   productImage: {
-    width: 60,
-    height: 60,
-    borderRadius: 8,
-    marginBottom: 10,
-    backgroundColor: '#f0f0f0',
+    width: 96,
+    height: 96,
+    borderRadius: 14,
+    backgroundColor: '#FAFAFA',
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
   },
-  productInfo: {
+  productMainMeta: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  brandBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  brandPillText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#111827',
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    overflow: 'hidden',
+    letterSpacing: 0.5,
+  },
+  categoryPillText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#6B7280',
+    backgroundColor: '#FAFAFA',
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+  productName: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#111827',
+    marginBottom: 6,
+    lineHeight: 23,
+  },
+  priceText: {
+    fontSize: 19,
+    fontWeight: '900',
+    color: '#000000',
+  },
+  sizePillContainer: {
+    backgroundColor: '#FAFAFA',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginBottom: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sizeLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#6B7280',
+    letterSpacing: 0.8,
+  },
+  sizePillText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#111827',
+    flex: 1,
+  },
+  cardFooterRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+    flexWrap: 'wrap',
+    gap: 10,
   },
-  productDetails: {
-    flex: 1,
+  metaInfoGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flexWrap: 'wrap',
   },
-  stockText: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 2,
+  stockBadgeText: {
+    fontSize: 12,
+    color: '#4B5563',
+    fontWeight: '500',
   },
-  categoryText: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 2,
+  colorBadgeText: {
+    fontSize: 12,
+    color: '#4B5563',
+    fontWeight: '500',
   },
-  brandText: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 2,
-  },
-  colorText: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 2,
-  },
-  locationText: {
-    fontSize: 14,
-    color: '#666',
+  locationBadgeText: {
+    fontSize: 12,
+    color: '#4B5563',
+    fontWeight: '500',
   },
   productActions: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  statusButton: {
-    backgroundColor: '#8B5CF6',
-    borderRadius: 15,
-    paddingHorizontal: 15,
-    paddingVertical: 5,
-    marginRight: 10,
-  },
-  statusText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  moreButton: {
-    width: 30,
-    height: 30,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  moreIcon: {
-    fontSize: 20,
-    color: '#8B5CF6',
+    gap: 8,
   },
   editCardButton: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#111827',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  editCardButtonText: {
+    color: '#111827',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  deleteCardButton: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#EF4444',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+  },
+  deleteCardButtonText: {
+    color: '#EF4444',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  statusBadgePill: {
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  statusText: {
+    color: '#111827',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  deleteModalCard: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  deleteIconContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#FEF2F2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  deleteIconText: {
+    fontSize: 26,
+  },
+  deleteModalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#111827',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  deleteModalText: {
+    fontSize: 14,
+    color: '#4B5563',
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  deleteModalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+    justifyContent: 'center',
+  },
+  deleteCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+  },
+  deleteCancelBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  deleteConfirmBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+  },
+  deleteConfirmBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  headerRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerLogoutBtn: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#EF4444',
+  },
+  headerLogoutText: {
+    color: '#EF4444',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  loginPageContainer: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  loginScrollContainer: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  loginCard: {
+    width: '100%',
+    maxWidth: 440,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 32,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.05,
+    shadowRadius: 16,
+    elevation: 3,
+  },
+  loginHeaderBox: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  loginLogoCircle: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    backgroundColor: '#FAFAFA',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 14,
+  },
+  loginLogoIcon: {
+    fontSize: 32,
+  },
+  loginAppTitle: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#000000',
+    marginBottom: 4,
+    letterSpacing: 0.5,
+  },
+  loginAppSubTitle: {
+    fontSize: 13,
+    color: '#6B7280',
+    marginBottom: 14,
+    textAlign: 'center',
+  },
+  requiredBadge: {
+    backgroundColor: '#FAFAFA',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  requiredBadgeText: {
+    color: '#374151',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  selectAccountLabel: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#111827',
+    marginBottom: 10,
+    letterSpacing: 0.3,
+  },
+  roleTabContainer: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 16,
+  },
+  roleTabButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 13,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 8,
+  },
+  roleTabActive: {
+    backgroundColor: '#000000',
+    borderColor: '#000000',
+  },
+  roleTabInactive: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E5E7EB',
+  },
+  roleTabIcon: {
+    fontSize: 18,
+  },
+  roleTabText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  roleTabTextActive: {
+    color: '#FFFFFF',
+  },
+  roleTabTextInactive: {
+    color: '#4B5563',
+  },
+  roleHintBox: {
+    backgroundColor: '#FAFAFA',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 18,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  adminHintBox: {
+    backgroundColor: '#FAFAFA',
+    borderColor: '#E5E7EB',
+  },
+  userHintBox: {
+    backgroundColor: '#FAFAFA',
+    borderColor: '#E5E7EB',
+  },
+  roleHintTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  roleHintText: {
+    fontSize: 12,
+    color: '#4B5563',
+    lineHeight: 17,
+  },
+  customLoginForm: {
+    marginTop: 4,
+  },
+  loginSubmitButton: {
+    backgroundColor: '#000000',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  loginSubmitButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  loginModalCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  loginSubTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#4b5563',
+    marginBottom: 12,
+  },
+  currentProfileBox: {
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+  },
+  currentProfileTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748b',
+    marginBottom: 6,
+  },
+  profileBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  profileRoleBadge: {
+    fontSize: 12,
+    fontWeight: '700',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginRight: 8,
+  },
+  adminBadge: {
+    backgroundColor: '#f3e8ff',
+    color: '#7e22ce',
+  },
+  userBadge: {
+    backgroundColor: '#dbeafe',
+    color: '#1d4ed8',
+  },
+  profileNameText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#1e293b',
+  },
+  profilePermissionsText: {
+    fontSize: 12,
+    color: '#64748b',
+    marginBottom: 10,
+    lineHeight: 16,
+  },
+  logoutButton: {
+    backgroundColor: '#fee2e2',
+    borderRadius: 8,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  logoutButtonText: {
+    color: '#dc2626',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  presetButtonsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 14,
+  },
+  presetAdminBtn: {
+    flex: 1,
     backgroundColor: '#f3e8ff',
     borderWidth: 1,
     borderColor: '#d8b4fe',
-    borderRadius: 15,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    marginRight: 8,
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    alignItems: 'center',
   },
-  editCardButtonText: {
-    color: '#7e22ce',
+  presetUserBtn: {
+    flex: 1,
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+  },
+  presetBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1e293b',
+  },
+  presetBtnSubText: {
+    fontSize: 11,
+    color: '#64748b',
+    marginTop: 2,
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 12,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#e2e8f0',
+  },
+  dividerText: {
+    marginHorizontal: 8,
     fontSize: 12,
-    fontWeight: '600',
-  },
-  productName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#333',
+    color: '#94a3b8',
   },
   // Bottom Navigation Styles
   bottomNav: {
