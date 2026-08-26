@@ -135,6 +135,20 @@ export default function ProductsScreen() {
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
 
+  // Success Popup Modal state
+  const [successModalVisible, setSuccessModalVisible] = useState<boolean>(false);
+  const [successModalTitle, setSuccessModalTitle] = useState<string>('');
+  const [successModalMessage, setSuccessModalMessage] = useState<string>('');
+
+  const showSuccessPopup = (title: string, message: string) => {
+    setSuccessModalTitle(title);
+    setSuccessModalMessage(message);
+    setSuccessModalVisible(true);
+    if (Platform.OS !== 'web') {
+      Alert.alert(title, message);
+    }
+  };
+
   // User Auth & Role State (Default null to force Login Screen first)
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
     if (typeof window !== 'undefined' && window.localStorage) {
@@ -326,7 +340,6 @@ export default function ProductsScreen() {
         return updated;
       });
 
-      Alert.alert('Success', 'Product added successfully to database!');
       setModalVisible(false);
 
       // Clear form inputs
@@ -339,6 +352,8 @@ export default function ProductsScreen() {
       setNewStock('');
       setNewLocationText('3 stores');
       setNewImageUrl('');
+
+      showSuccessPopup('ทำการเพิ่มสินค้าสำเร็จแล้ว', `เพิ่มสินค้า "${createdProduct.name}" ลงในระบบเรียบร้อยแล้ว`);
     } catch (err: any) {
       console.error('Error adding product:', err);
       Alert.alert('Error', err.message || 'Failed to add product');
@@ -435,9 +450,10 @@ export default function ProductsScreen() {
       });
       setFailedImages((prev) => ({ ...prev, [targetId]: false }));
 
-      Alert.alert('Success', 'Product details updated successfully in database!');
       setEditModalVisible(false);
       setEditingProduct(null);
+
+      showSuccessPopup('ทำการแก้ไขสินค้าสำเร็จแล้ว', `บันทึกและอัปเดตข้อมูลสินค้า "${updatedPayload.name}" เรียบร้อยแล้ว`);
     } catch (err: any) {
       console.error('Error updating product:', err);
       Alert.alert('Error', err.message || 'Failed to update product');
@@ -1182,6 +1198,31 @@ export default function ProductsScreen() {
             </View>
           </View>
         </Modal>
+        {/* Success Alert Popup Modal */}
+        <Modal
+          animationType="fade"
+          transparent={true}
+          visible={successModalVisible}
+          onRequestClose={() => setSuccessModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.successModalCard}>
+              <View style={styles.successIconContainer}>
+                <Text style={styles.successIconText}>✅</Text>
+              </View>
+              <Text style={styles.successModalTitle}>{successModalTitle || 'ดำเนินการสำเร็จ'}</Text>
+              <Text style={styles.successModalText}>
+                {successModalMessage || 'ระบบได้ทำการบันทึกข้อมูลเรียบร้อยแล้ว'}
+              </Text>
+              <TouchableOpacity
+                style={styles.successConfirmBtn}
+                onPress={() => setSuccessModalVisible(false)}
+              >
+                <Text style={styles.successConfirmBtnText}>ตกลง</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
         {/* User Login Modal */}
         <Modal
           animationType="fade"
@@ -1560,6 +1601,61 @@ const styles = StyleSheet.create({
     color: '#111827',
     fontSize: 12,
     fontWeight: '700',
+  },
+  successModalCard: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  successIconContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#ECFDF5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  successIconText: {
+    fontSize: 28,
+  },
+  successModalTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#065F46',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  successModalText: {
+    fontSize: 14,
+    color: '#374151',
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
+  },
+  successConfirmBtn: {
+    width: '100%',
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+  },
+  successConfirmBtnText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   deleteModalCard: {
     width: '100%',
