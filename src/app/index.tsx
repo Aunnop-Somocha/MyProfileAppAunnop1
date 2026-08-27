@@ -31,6 +31,22 @@ interface Product {
   image_url: string;
 }
 
+interface OrderItem {
+  id: string | number;
+  txn_id: string;
+  product_id?: string;
+  product_name: string;
+  product_image?: string;
+  customer_name: string;
+  customer_phone: string;
+  customer_address: string;
+  size?: string;
+  quantity: number;
+  total_price: number;
+  status: string;
+  created_at?: string;
+}
+
 interface UserProfile {
   id: number | string;
   username: string;
@@ -80,10 +96,83 @@ const cleanUrl = (url: string = '') => {
   if (!url || typeof url !== 'string') return '';
   let trimmed = url.trim();
   if (!trimmed) return '';
+  if (trimmed.startsWith('data:')) {
+    return trimmed;
+  }
   if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
     trimmed = 'https://' + trimmed;
   }
   return trimmed;
+};
+
+// Process & compress uploaded image file to lightweight Base64 JPEG Data URL
+const processImageFile = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      if (typeof window === 'undefined' || !(window as any).Image) {
+        resolve(event.target?.result as string);
+        return;
+      }
+      const img = new (window as any).Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+        const maxDim = 600;
+
+        if (width > height) {
+          if (width > maxDim) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          }
+        } else {
+          if (height > maxDim) {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+          resolve(dataUrl);
+        } else {
+          resolve(event.target?.result as string);
+        }
+      };
+      img.onerror = () => resolve(event.target?.result as string);
+      img.src = event.target?.result as string;
+    };
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(file);
+  });
+};
+
+// Trigger browser native file picker to select an image from device
+const handlePickImageFile = (setImageUrlState: (url: string) => void) => {
+  if (Platform.OS === 'web' && typeof document !== 'undefined') {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = async (e: any) => {
+      const file = e.target?.files?.[0];
+      if (file) {
+        try {
+          const resizedDataUrl = await processImageFile(file);
+          setImageUrlState(resizedDataUrl);
+        } catch (err) {
+          Alert.alert('Error', 'Failed to load selected image file.');
+        }
+      }
+    };
+    input.click();
+  } else {
+    Alert.alert('Notice', 'File upload is supported on Web browsers.');
+  }
 };
 
 const getMatchingImage = (name: string = '', url?: string) => {
@@ -148,6 +237,26 @@ export default function ProductsScreen() {
       Alert.alert(title, message);
     }
   };
+
+  // Checkout & Payment State (User Buying Flow)
+  const [checkoutModalVisible, setCheckoutModalVisible] = useState<boolean>(false);
+  const [selectedProductForBuy, setSelectedProductForBuy] = useState<Product | null>(null);
+  const [customerName, setCustomerName] = useState<string>('');
+  const [customerPhone, setCustomerPhone] = useState<string>('');
+  const [customerAddress, setCustomerAddress] = useState<string>('');
+  const [selectedSize, setSelectedSize] = useState<string>('US 8');
+  const [quantity, setQuantity] = useState<number>(1);
+
+  const [paymentModalVisible, setPaymentModalVisible] = useState<boolean>(false);
+  const [currentTransactionId, setCurrentTransactionId] = useState<string>('');
+  const [paymentQrUrl, setPaymentQrUrl] = useState<string>('');
+  const [totalAmount, setTotalAmount] = useState<number>(0);
+  const [processingPayment, setProcessingPayment] = useState<boolean>(false);
+
+  // Admin Orders Management State
+  const [orders, setOrders] = useState<OrderItem[]>([]);
+  const [ordersModalVisible, setOrdersModalVisible] = useState<boolean>(false);
+  const [loadingOrders, setLoadingOrders] = useState<boolean>(false);
 
   // User Auth & Role State (Default null to force Login Screen first)
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(() => {
@@ -264,7 +373,83 @@ export default function ProductsScreen() {
   // Default auto-fetch products on screen load (As per Slide 26)
   useEffect(() => {
     void fetchProducts();
+    void fetchOrders();
   }, []);
+
+  // Fetch Customer Orders from API / Database
+  const fetchOrders = async () => {
+    try {
+      setLoadingOrders(true);
+      let data: OrderItem[] = [];
+      try {
+        data = await apiCall(BACKEND_URL.replace('/products', '/orders'));
+      } catch (err1) {
+        try {
+          data = await apiCall('http://119.59.102.161:3049/api/orders');
+        } catch (err2) {
+          try {
+            data = await apiCall('http://localhost:3049/api/orders');
+          } catch (err3) {
+            const saved = typeof window !== 'undefined' ? localStorage.getItem('MY_ORDERS_DB') : null;
+            if (saved) data = JSON.parse(saved);
+          }
+        }
+      }
+      if (Array.isArray(data)) {
+        setOrders(data);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('MY_ORDERS_DB', JSON.stringify(data));
+        }
+      }
+    } catch (err) {
+      console.log('Fetch orders error:', err);
+    } finally {
+      setLoadingOrders(false);
+    }
+  };
+
+  const openOrdersModal = () => {
+    setOrdersModalVisible(true);
+    void fetchOrders();
+  };
+
+  // Update Order Status by Admin (PUT API / State)
+  const handleUpdateOrderStatus = async (orderId: string | number, newStatus: string) => {
+    try {
+      setOrders((prev) => {
+        const updated = prev.map((o) =>
+          String(o.id) === String(orderId) || o.txn_id === String(orderId)
+            ? { ...o, status: newStatus }
+            : o
+        );
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('MY_ORDERS_DB', JSON.stringify(updated));
+        }
+        return updated;
+      });
+
+      try {
+        await apiCall(`${BACKEND_URL.replace('/products', '/orders')}/${orderId}/status`, {
+          method: 'PUT',
+          body: JSON.stringify({ status: newStatus }),
+        });
+      } catch (err1) {
+        try {
+          await apiCall(`http://119.59.102.161:3049/api/orders/${orderId}/status`, {
+            method: 'PUT',
+            body: JSON.stringify({ status: newStatus }),
+          });
+        } catch (err2) {}
+      }
+
+      showSuccessPopup(
+        'อัปเดตสถานะสำเร็จ!',
+        `เปลี่ยนสถานะคำสั่งซื้อเป็น "${newStatus}" เรียบร้อยแล้ว`
+      );
+    } catch (err: any) {
+      Alert.alert('Error', err.message || 'ไม่สามารถเปลี่ยนสถานะได้');
+    }
+  };
 
   // Add Product Handler (Saves to database via API)
   const handleAddProduct = async () => {
@@ -459,6 +644,135 @@ export default function ProductsScreen() {
       Alert.alert('Error', err.message || 'Failed to update product');
     } finally {
       setSavingEdit(false);
+    }
+  };
+
+  // Open Checkout Modal for buying a product
+  const openCheckoutModal = (product: Product) => {
+    setSelectedProductForBuy(product);
+    setCustomerName(currentUser?.name || '');
+    setCustomerPhone('');
+    setCustomerAddress('');
+    const sizesList = (product.sizes || 'US 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12')
+      .split(',')
+      .map((s) => s.trim());
+    setSelectedSize(sizesList[0] || 'US 8');
+    setQuantity(1);
+    setCheckoutModalVisible(true);
+  };
+
+  // Generate dynamic QR Code for payment
+  const handleProceedToPayment = () => {
+    if (!customerName.trim()) {
+      Alert.alert('ข้อมูลไม่ครบถ้วน', 'กรุณากรอกชื่อ-นามสกุลผู้รับสินค้า');
+      return;
+    }
+    if (!customerPhone.trim()) {
+      Alert.alert('ข้อมูลไม่ครบถ้วน', 'กรุณากรอกเบอร์โทรศัพท์ผู้รับสินค้า');
+      return;
+    }
+    if (!customerAddress.trim()) {
+      Alert.alert('ข้อมูลไม่ครบถ้วน', 'กรุณากรอกที่อยู่จัดส่งสินค้า');
+      return;
+    }
+
+    const price = Number(selectedProductForBuy?.price || 3500);
+    const total = price * quantity;
+    const txnId = `TXN-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const qrData = `PROMPTPAY-0899999999-AMT-${total}-REF-${txnId}`;
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(qrData)}`;
+
+    setTotalAmount(total);
+    setCurrentTransactionId(txnId);
+    setPaymentQrUrl(qrUrl);
+    setCheckoutModalVisible(false);
+    setPaymentModalVisible(true);
+  };
+
+  // Confirm Payment & Deduct Stock
+  const handleConfirmPayment = async () => {
+    if (!selectedProductForBuy) return;
+    setProcessingPayment(true);
+
+    try {
+      // Deduct stock locally
+      const updatedStock = Math.max(0, (selectedProductForBuy.stock || 1) - quantity);
+      const updatedStockText = `${updatedStock} in stock`;
+
+      setProducts((prev) => {
+        const updated = prev.map((p) =>
+          p.id === selectedProductForBuy.id
+            ? { ...p, stock: updatedStock, stock_text: updatedStockText }
+            : p
+        );
+        saveToLocalCache(updated);
+        return updated;
+      });
+
+      // Background API PUT call if reachable
+      try {
+        await apiCall(`${BACKEND_URL}/${selectedProductForBuy.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            ...selectedProductForBuy,
+            stock: updatedStock,
+            stock_text: updatedStockText,
+          }),
+        });
+      } catch (err) {}
+
+      // Save Order to Database via POST API
+      const orderPayload = {
+        txn_id: currentTransactionId,
+        product_id: selectedProductForBuy.id,
+        product_name: selectedProductForBuy.name,
+        product_image: selectedProductForBuy.image_url,
+        customer_name: customerName,
+        customer_phone: customerPhone,
+        customer_address: customerAddress,
+        size: selectedSize,
+        quantity: quantity,
+        total_price: totalAmount,
+        status: 'Pending',
+      };
+
+      try {
+        await apiCall(BACKEND_URL.replace('/products', '/orders'), {
+          method: 'POST',
+          body: JSON.stringify(orderPayload),
+        });
+      } catch (err1) {
+        try {
+          await apiCall('http://119.59.102.161:3049/api/orders', {
+            method: 'POST',
+            body: JSON.stringify(orderPayload),
+          });
+        } catch (err2) {}
+      }
+
+      const newOrderItem: OrderItem = {
+        id: Date.now(),
+        ...orderPayload,
+        created_at: new Date().toISOString(),
+      };
+      setOrders((prev) => {
+        const updated = [newOrderItem, ...prev];
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('MY_ORDERS_DB', JSON.stringify(updated));
+        }
+        return updated;
+      });
+
+      setPaymentModalVisible(false);
+      showSuccessPopup(
+        'ชำระเงินสำเร็จ! 🎉',
+        `ชำระเงิน ฿${totalAmount.toLocaleString('th-TH')} สำเร็จแล้ว\nรหัสอ้างอิง: ${currentTransactionId}\n\nสินค้าจะถูกจัดส่งไปที่:\nคุณ${customerName} (${customerPhone})\n${customerAddress}`
+      );
+      setSelectedProductForBuy(null);
+    } catch (error: any) {
+      Alert.alert('Payment Error', error?.message || 'เกิดข้อผิดพลาดในการชำระเงิน');
+    } finally {
+      setProcessingPayment(false);
     }
   };
 
@@ -774,14 +1088,21 @@ export default function ProductsScreen() {
               onChangeText={setSearchQuery}
             />
           </View>
-          {isAdmin && (
-            <TouchableOpacity style={styles.addButton} onPress={() => setModalVisible(true)}>
-              <Text style={styles.addButtonText}>+ Add Product</Text>
+          <View style={styles.searchActionsRow}>
+            {isAdmin && (
+              <TouchableOpacity style={styles.addButton} onPress={() => setModalVisible(true)}>
+                <Text style={styles.addButtonText}>+ Add Product</Text>
+              </TouchableOpacity>
+            )}
+            {isAdmin && (
+              <TouchableOpacity style={styles.ordersButton} onPress={openOrdersModal}>
+                <Text style={styles.ordersButtonText}>📋 Orders ({orders.length})</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={styles.filterButton}>
+              <Text style={styles.filterText}>Filter ▼</Text>
             </TouchableOpacity>
-          )}
-          <TouchableOpacity style={styles.filterButton}>
-            <Text style={styles.filterText}>Filter ▼</Text>
-          </TouchableOpacity>
+          </View>
         </View>
 
         {/* Products List */}
@@ -825,6 +1146,13 @@ export default function ProductsScreen() {
                 </View>
 
                 <View style={styles.productActions}>
+                  <TouchableOpacity
+                    style={styles.buyCardButton}
+                    onPress={() => openCheckoutModal(product)}
+                  >
+                    <Text style={styles.buyCardButtonText}>🛒 ซื้อสินค้า</Text>
+                  </TouchableOpacity>
+
                   {isAdmin && (
                     <TouchableOpacity
                       style={styles.editCardButton}
@@ -973,10 +1301,19 @@ export default function ProductsScreen() {
                   onChangeText={setNewLocationText}
                 />
 
-                <Text style={styles.inputLabel}>Image URL (Optional)</Text>
+                <Text style={styles.inputLabel}>Product Image</Text>
+                <View style={styles.imageOptionBox}>
+                  <TouchableOpacity
+                    style={styles.filePickerButton}
+                    onPress={() => handlePickImageFile(setNewImageUrl)}
+                  >
+                    <Text style={styles.filePickerButtonText}>📁 Upload Image File</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.orText}>OR Enter Image URL:</Text>
+                </View>
                 <TextInput
                   style={styles.modalInput}
-                  placeholder="https://..."
+                  placeholder="https://... or paste image link"
                   placeholderTextColor="#aaa"
                   value={newImageUrl}
                   onChangeText={setNewImageUrl}
@@ -989,6 +1326,14 @@ export default function ProductsScreen() {
                     style={styles.modalPreviewImage}
                     resizeMode="cover"
                   />
+                  {newImageUrl ? (
+                    <TouchableOpacity
+                      style={styles.clearImageBtn}
+                      onPress={() => setNewImageUrl('')}
+                    >
+                      <Text style={styles.clearImageBtnText}>Clear Image</Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
 
                 <View style={styles.modalButtonContainer}>
@@ -1107,10 +1452,19 @@ export default function ProductsScreen() {
                   onChangeText={setEditLocationText}
                 />
 
-                <Text style={styles.inputLabel}>Image URL (Optional)</Text>
+                <Text style={styles.inputLabel}>Product Image</Text>
+                <View style={styles.imageOptionBox}>
+                  <TouchableOpacity
+                    style={styles.filePickerButton}
+                    onPress={() => handlePickImageFile(setEditImageUrl)}
+                  >
+                    <Text style={styles.filePickerButtonText}>📁 Upload Image File</Text>
+                  </TouchableOpacity>
+                  <Text style={styles.orText}>OR Enter Image URL:</Text>
+                </View>
                 <TextInput
                   style={styles.modalInput}
-                  placeholder="https://..."
+                  placeholder="https://... or paste image link"
                   placeholderTextColor="#aaa"
                   value={editImageUrl}
                   onChangeText={setEditImageUrl}
@@ -1123,6 +1477,14 @@ export default function ProductsScreen() {
                     style={styles.modalPreviewImage}
                     resizeMode="cover"
                   />
+                  {editImageUrl ? (
+                    <TouchableOpacity
+                      style={styles.clearImageBtn}
+                      onPress={() => setEditImageUrl('')}
+                    >
+                      <Text style={styles.clearImageBtnText}>Clear Image</Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
 
                 <View style={styles.modalButtonContainer}>
@@ -1146,6 +1508,235 @@ export default function ProductsScreen() {
                   </TouchableOpacity>
                 </View>
               </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Customer Shipping & Checkout Modal */}
+        <Modal
+          animationType="slide"
+          transparent={true}
+          visible={checkoutModalVisible}
+          onRequestClose={() => setCheckoutModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>🛍️ สั่งซื้อสินค้า / Checkout</Text>
+                <TouchableOpacity onPress={() => setCheckoutModalVisible(false)}>
+                  <Text style={styles.modalCloseIcon}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              {selectedProductForBuy && (
+                <ScrollView style={styles.modalForm} showsVerticalScrollIndicator={false}>
+                  {/* Selected Product Summary Box */}
+                  <View style={styles.checkoutProductCard}>
+                    <Image
+                      source={{
+                        uri: cleanUrl(selectedProductForBuy.image_url) || defaultImageForProduct(selectedProductForBuy.name),
+                      }}
+                      style={styles.checkoutProductImage}
+                      resizeMode="cover"
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.checkoutProductName}>{selectedProductForBuy.name}</Text>
+                      <Text style={styles.checkoutProductBrand}>
+                        {(selectedProductForBuy.brand || 'Nike').toUpperCase()} • {selectedProductForBuy.category}
+                      </Text>
+                      <Text style={styles.checkoutProductPrice}>
+                        ฿{Number(selectedProductForBuy.price || 3500).toLocaleString('th-TH')} / ชิ้น
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text style={styles.checkoutSectionTitle}>📦 ข้อมูลผู้รับสินค้า (Shipping Info)</Text>
+
+                  <Text style={styles.inputLabel}>ชื่อ-นามสกุล ผู้รับ *</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    placeholder="เช่น สมชาย ใจดี"
+                    placeholderTextColor="#aaa"
+                    value={customerName}
+                    onChangeText={setCustomerName}
+                  />
+
+                  <Text style={styles.inputLabel}>เบอร์โทรศัพท์ติดต่อ *</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    placeholder="เช่น 081-234-5678"
+                    placeholderTextColor="#aaa"
+                    keyboardType="phone-pad"
+                    value={customerPhone}
+                    onChangeText={setCustomerPhone}
+                  />
+
+                  <Text style={styles.inputLabel}>ที่อยู่จัดส่งสินค้าอย่างละเอียด *</Text>
+                  <TextInput
+                    style={[styles.modalInput, { height: 74, textAlignVertical: 'top' }]}
+                    placeholder="เช่น 123/45 ถนนสุขุมวิท แขวงคลองเตย เขตคลองเตย กรุงเทพฯ 10110"
+                    placeholderTextColor="#aaa"
+                    multiline={true}
+                    numberOfLines={3}
+                    value={customerAddress}
+                    onChangeText={setCustomerAddress}
+                  />
+
+                  <Text style={styles.inputLabel}>เลือกไซส์รองเท้า (Select Size) *</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      {(selectedProductForBuy.sizes || 'US 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12')
+                        .split(',')
+                        .map((sz) => sz.trim())
+                        .map((sizeOpt) => (
+                          <TouchableOpacity
+                            key={sizeOpt}
+                            style={[
+                              styles.sizeOptionBtn,
+                              selectedSize === sizeOpt && styles.sizeOptionBtnActive,
+                            ]}
+                            onPress={() => setSelectedSize(sizeOpt)}
+                          >
+                            <Text
+                              style={[
+                                styles.sizeOptionText,
+                                selectedSize === sizeOpt && styles.sizeOptionTextActive,
+                              ]}
+                            >
+                              {sizeOpt}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                    </View>
+                  </ScrollView>
+
+                  <Text style={styles.inputLabel}>จำนวนสินค้า (Quantity)</Text>
+                  <View style={styles.quantityCounterRow}>
+                    <TouchableOpacity
+                      style={styles.qtyBtn}
+                      onPress={() => setQuantity((prev) => Math.max(1, prev - 1))}
+                    >
+                      <Text style={styles.qtyBtnText}>-</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.qtyValueText}>{quantity}</Text>
+                    <TouchableOpacity
+                      style={styles.qtyBtn}
+                      onPress={() =>
+                        setQuantity((prev) =>
+                          Math.min(selectedProductForBuy.stock || 99, prev + 1)
+                        )
+                      }
+                    >
+                      <Text style={styles.qtyBtnText}>+</Text>
+                    </TouchableOpacity>
+                    <Text style={{ fontSize: 12, color: '#64748b', marginLeft: 10 }}>
+                      (เหลือ {selectedProductForBuy.stock || 0} ชิ้น)
+                    </Text>
+                  </View>
+
+                  {/* Total Summary Row */}
+                  <View style={styles.checkoutTotalRow}>
+                    <Text style={styles.checkoutTotalLabel}>ยอดชำระสุทธิ (Total Amount):</Text>
+                    <Text style={styles.checkoutTotalPrice}>
+                      ฿{(Number(selectedProductForBuy.price || 3500) * quantity).toLocaleString('th-TH')}
+                    </Text>
+                  </View>
+
+                  <View style={styles.modalButtonContainer}>
+                    <TouchableOpacity
+                      style={styles.cancelButton}
+                      onPress={() => setCheckoutModalVisible(false)}
+                    >
+                      <Text style={styles.cancelButtonText}>ยกเลิก</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.proceedPaymentBtn}
+                      onPress={handleProceedToPayment}
+                    >
+                      <Text style={styles.proceedPaymentBtnText}>💳 ไปยังหน้าชำระเงิน</Text>
+                    </TouchableOpacity>
+                  </View>
+                </ScrollView>
+              )}
+            </View>
+          </View>
+        </Modal>
+
+        {/* Mock PromptPay QR Payment Modal */}
+        <Modal
+          animationType="fade"
+          transparent={true}
+          visible={paymentModalVisible}
+          onRequestClose={() => setPaymentModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.qrModalCard}>
+              {/* PromptPay Header Badge */}
+              <View style={styles.promptPayHeader}>
+                <Text style={styles.promptPayTitle}>THAI QR PAYMENT</Text>
+                <Text style={styles.promptPaySubTitle}>พร้อมเพย์ (PromptPay)</Text>
+              </View>
+
+              <Text style={styles.qrInstructionText}>สแกน QR Code เพื่อชำระเงินยอดสั่งซื้อ</Text>
+
+              {/* Dynamic QR Code Image */}
+              <View style={styles.qrContainer}>
+                {paymentQrUrl ? (
+                  <Image source={{ uri: paymentQrUrl }} style={styles.qrImage} resizeMode="contain" />
+                ) : (
+                  <ActivityIndicator size="large" color="#003b6d" />
+                )}
+              </View>
+
+              {/* Total Amount Badge */}
+              <View style={styles.qrAmountBox}>
+                <Text style={styles.qrAmountLabel}>ยอดเงินที่ต้องชำระ:</Text>
+                <Text style={styles.qrAmountValue}>฿{totalAmount.toLocaleString('th-TH')}.00</Text>
+                <Text style={styles.qrRefText}>Ref ID: {currentTransactionId}</Text>
+              </View>
+
+              {/* Shipping & Order Summary */}
+              <View style={styles.orderSummaryBox}>
+                <Text style={styles.orderSummaryTitle}>📋 สรุปรายการสั่งซื้อ:</Text>
+                <Text style={styles.orderSummaryItem}>
+                  👟 {selectedProductForBuy?.name} (ไซส์ {selectedSize} x {quantity} ชิ้น)
+                </Text>
+                <Text style={styles.orderSummaryItem}>
+                  👤 ผู้รับ: {customerName} ({customerPhone})
+                </Text>
+                <Text style={styles.orderSummaryItem} numberOfLines={2}>
+                  📍 ที่อยู่: {customerAddress}
+                </Text>
+              </View>
+
+              <View style={styles.qrStatusBox}>
+                <ActivityIndicator size="small" color="#0d47a1" style={{ marginRight: 6 }} />
+                <Text style={styles.qrStatusText}>กำลังรอการสแกนชำระเงิน... (Awaiting Payment)</Text>
+              </View>
+
+              {/* Confirm & Cancel Buttons */}
+              <View style={styles.qrModalButtons}>
+                <TouchableOpacity
+                  style={styles.qrCancelBtn}
+                  onPress={() => setPaymentModalVisible(false)}
+                  disabled={processingPayment}
+                >
+                  <Text style={styles.qrCancelBtnText}>ยกเลิก</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.qrConfirmBtn, processingPayment && { opacity: 0.7 }]}
+                  onPress={handleConfirmPayment}
+                  disabled={processingPayment}
+                >
+                  {processingPayment ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={styles.qrConfirmBtnText}>✅ ยืนยันการชำระเงิน</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </Modal>
@@ -1223,6 +1814,166 @@ export default function ProductsScreen() {
             </View>
           </View>
         </Modal>
+
+        {/* Admin Orders & Order Status Management Modal */}
+        <Modal
+          animationType="slide"
+          transparent={true}
+          visible={ordersModalVisible}
+          onRequestClose={() => setOrdersModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { maxHeight: '85%' }]}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>📦 คำสั่งซื้อและจัดการสถานะ ({orders.length})</Text>
+                <TouchableOpacity onPress={() => setOrdersModalVisible(false)}>
+                  <Text style={styles.modalCloseIcon}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              {loadingOrders ? (
+                <View style={{ padding: 40, alignItems: 'center' }}>
+                  <ActivityIndicator size="large" color="#8B5CF6" />
+                  <Text style={{ marginTop: 10, color: '#64748b' }}>กำลังโหลดข้อมูลคำสั่งซื้อ...</Text>
+                </View>
+              ) : orders.length === 0 ? (
+                <View style={{ padding: 40, alignItems: 'center' }}>
+                  <Text style={{ fontSize: 40, marginBottom: 10 }}>🛍️</Text>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: '#334155' }}>ยังไม่มีรายการสั่งซื้อ</Text>
+                  <Text style={{ fontSize: 13, color: '#64748b', marginTop: 4 }}>
+                    เมื่อมีลูกค้าสั่งซื้อสินค้า รายการและสถานะจะปรากฏที่นี่
+                  </Text>
+                </View>
+              ) : (
+                <ScrollView style={styles.modalForm} showsVerticalScrollIndicator={false}>
+                  {orders.map((ord) => {
+                    const statusColor =
+                      ord.status === 'Delivered'
+                        ? { bg: '#dcfce7', text: '#15803d', icon: '🟢', label: 'จัดส่งสำเร็จ' }
+                        : ord.status === 'Shipped'
+                        ? { bg: '#f3e8ff', text: '#7e22ce', icon: '🟣', label: 'จัดส่งแล้ว' }
+                        : ord.status === 'Processing'
+                        ? { bg: '#e0f2fe', text: '#0369a1', icon: '🔵', label: 'กำลังเตรียมสินค้า' }
+                        : ord.status === 'Cancelled'
+                        ? { bg: '#fee2e2', text: '#b91c1c', icon: '🔴', label: 'ยกเลิก' }
+                        : { bg: '#fef9c3', text: '#a16207', icon: '🟡', label: 'รอจัดส่ง (ชำระแล้ว)' };
+
+                    return (
+                      <View key={String(ord.id || ord.txn_id)} style={styles.orderAdminCard}>
+                        {/* Order Header */}
+                        <View style={styles.orderAdminHeader}>
+                          <View>
+                            <Text style={styles.orderTxnId}>#{ord.txn_id || ord.id}</Text>
+                            <Text style={styles.orderTimeText}>
+                              {ord.created_at ? new Date(ord.created_at).toLocaleString('th-TH') : 'เมื่อสักครู่'}
+                            </Text>
+                          </View>
+                          <View style={[styles.orderStatusBadge, { backgroundColor: statusColor.bg }]}>
+                            <Text style={[styles.orderStatusText, { color: statusColor.text }]}>
+                              {statusColor.icon} {statusColor.label}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {/* Order Item Info */}
+                        <View style={styles.orderItemRow}>
+                          {ord.product_image ? (
+                            <Image
+                              source={{ uri: cleanUrl(ord.product_image) }}
+                              style={styles.orderItemImage}
+                              resizeMode="cover"
+                            />
+                          ) : null}
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.orderProductName}>{ord.product_name}</Text>
+                            <Text style={styles.orderProductMeta}>
+                              ไซส์: {ord.size || 'US 8'} • จำนวน: {ord.quantity || 1} ชิ้น
+                            </Text>
+                            <Text style={styles.orderTotalPrice}>
+                              ฿{Number(ord.total_price || 0).toLocaleString('th-TH')}
+                            </Text>
+                          </View>
+                        </View>
+
+                        {/* Customer Info Box */}
+                        <View style={styles.orderCustomerBox}>
+                          <Text style={styles.orderCustomerTitle}>👤 ข้อมูลผู้สั่งซื้อ & ที่อยู่จัดส่ง:</Text>
+                          <Text style={styles.orderCustomerText}>
+                            คุณ{ord.customer_name} ({ord.customer_phone})
+                          </Text>
+                          <Text style={styles.orderCustomerAddress} numberOfLines={2}>
+                            📍 {ord.customer_address}
+                          </Text>
+                        </View>
+
+                        {/* Admin Status Change Controls */}
+                        {isAdmin && (
+                          <View style={styles.statusChangeContainer}>
+                            <Text style={styles.statusChangeLabel}>⚡ เปลี่ยนสถานะสินค้า:</Text>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 6 }}>
+                              <View style={{ flexDirection: 'row', gap: 6 }}>
+                                <TouchableOpacity
+                                  style={[
+                                    styles.statusChangeBtn,
+                                    ord.status === 'Pending' && styles.statusBtnActivePending,
+                                  ]}
+                                  onPress={() => handleUpdateOrderStatus(ord.id || ord.txn_id, 'Pending')}
+                                >
+                                  <Text style={styles.statusChangeBtnText}>🟡 รอจัดส่ง</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                  style={[
+                                    styles.statusChangeBtn,
+                                    ord.status === 'Processing' && styles.statusBtnActiveProcessing,
+                                  ]}
+                                  onPress={() => handleUpdateOrderStatus(ord.id || ord.txn_id, 'Processing')}
+                                >
+                                  <Text style={styles.statusChangeBtnText}>🔵 กำลังเตรียม</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                  style={[
+                                    styles.statusChangeBtn,
+                                    ord.status === 'Shipped' && styles.statusBtnActiveShipped,
+                                  ]}
+                                  onPress={() => handleUpdateOrderStatus(ord.id || ord.txn_id, 'Shipped')}
+                                >
+                                  <Text style={styles.statusChangeBtnText}>🟣 จัดส่งแล้ว</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                  style={[
+                                    styles.statusChangeBtn,
+                                    ord.status === 'Delivered' && styles.statusBtnActiveDelivered,
+                                  ]}
+                                  onPress={() => handleUpdateOrderStatus(ord.id || ord.txn_id, 'Delivered')}
+                                >
+                                  <Text style={styles.statusChangeBtnText}>🟢 จัดส่งสำเร็จ</Text>
+                                </TouchableOpacity>
+
+                                <TouchableOpacity
+                                  style={[
+                                    styles.statusChangeBtn,
+                                    ord.status === 'Cancelled' && styles.statusBtnActiveCancelled,
+                                  ]}
+                                  onPress={() => handleUpdateOrderStatus(ord.id || ord.txn_id, 'Cancelled')}
+                                >
+                                  <Text style={styles.statusChangeBtnText}>🔴 ยกเลิก</Text>
+                                </TouchableOpacity>
+                              </View>
+                            </ScrollView>
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
+                </ScrollView>
+              )}
+            </View>
+          </View>
+        </Modal>
+
         {/* User Login Modal */}
         <Modal
           animationType="fade"
@@ -1313,14 +2064,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FFFFFF',
+    maxWidth: 480,
+    width: '100%',
+    alignSelf: 'center',
   },
   // Pure White Minimalist Header Styles
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#F3F4F6',
@@ -1340,10 +2094,10 @@ const styles = StyleSheet.create({
     color: '#111827',
   },
   headerTitle: {
-    fontSize: 19,
+    fontSize: 18,
     fontWeight: '900',
     color: '#000000',
-    letterSpacing: 2,
+    letterSpacing: 1.5,
   },
   roleBadgeHeader: {
     fontSize: 10,
@@ -1366,16 +2120,15 @@ const styles = StyleSheet.create({
   },
   // Search Container Styles
   searchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: '#F3F4F6',
+    gap: 10,
   },
   searchBar: {
-    flex: 1,
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#FAFAFA',
@@ -1383,7 +2136,6 @@ const styles = StyleSheet.create({
     borderColor: '#E5E7EB',
     borderRadius: 12,
     paddingHorizontal: 14,
-    marginRight: 12,
   },
   searchIcon: {
     fontSize: 15,
@@ -1392,17 +2144,24 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    paddingVertical: 11,
+    paddingVertical: 10,
     fontSize: 14,
     color: '#111827',
     fontWeight: '500',
   },
+  searchActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
   addButton: {
+    flex: 1,
     backgroundColor: '#000000',
     borderRadius: 12,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
-    marginRight: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   addButtonText: {
     color: '#FFFFFF',
@@ -1411,12 +2170,14 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   filterButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 11,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   filterText: {
     color: '#374151',
@@ -1426,14 +2187,15 @@ const styles = StyleSheet.create({
   // Pure White Minimalist Sneaker Product List Styles
   productsList: {
     flex: 1,
-    padding: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     backgroundColor: '#FFFFFF',
   },
   productCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 20,
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 16,
     borderWidth: 1,
     borderColor: '#E5E7EB',
     shadowColor: '#000',
@@ -2150,8 +2912,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 14,
     backgroundColor: '#f8f9fa',
-    padding: 8,
-    borderRadius: 8,
+    padding: 10,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: '#e2e8f0',
   },
@@ -2166,5 +2928,470 @@ const styles = StyleSheet.create({
     height: 50,
     borderRadius: 6,
     backgroundColor: '#eee',
+  },
+  imageOptionBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  filePickerButton: {
+    backgroundColor: '#000000',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  filePickerButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  orText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  clearImageBtn: {
+    marginLeft: 'auto',
+    backgroundColor: '#fee2e2',
+    borderWidth: 1,
+    borderColor: '#fca5a5',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  clearImageBtnText: {
+    color: '#dc2626',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  // Checkout & Buying Styles
+  buyCardButton: {
+    backgroundColor: '#10B981',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  buyCardButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  checkoutProductCard: {
+    flexDirection: 'row',
+    backgroundColor: '#f8fafc',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    marginBottom: 14,
+    alignItems: 'center',
+    gap: 12,
+  },
+  checkoutProductImage: {
+    width: 60,
+    height: 60,
+    borderRadius: 8,
+    backgroundColor: '#eee',
+  },
+  checkoutProductName: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#1e293b',
+  },
+  checkoutProductBrand: {
+    fontSize: 11,
+    color: '#64748b',
+    marginTop: 2,
+  },
+  checkoutProductPrice: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#10B981',
+    marginTop: 4,
+  },
+  checkoutSectionTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#1e293b',
+    marginBottom: 10,
+    marginTop: 6,
+  },
+  sizeOptionBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    backgroundColor: '#ffffff',
+  },
+  sizeOptionBtnActive: {
+    backgroundColor: '#000000',
+    borderColor: '#000000',
+  },
+  sizeOptionText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#334155',
+  },
+  sizeOptionTextActive: {
+    color: '#ffffff',
+  },
+  quantityCounterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  qtyBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    backgroundColor: '#f1f5f9',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  qtyBtnText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  qtyValueText: {
+    fontSize: 16,
+    fontWeight: '800',
+    marginHorizontal: 14,
+    color: '#0f172a',
+  },
+  checkoutTotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#f0fdf4',
+    borderWidth: 1,
+    borderColor: '#bbf7d0',
+    borderRadius: 10,
+    padding: 12,
+    marginVertical: 10,
+  },
+  checkoutTotalLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#166534',
+  },
+  checkoutTotalPrice: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#15803d',
+  },
+  proceedPaymentBtn: {
+    backgroundColor: '#10B981',
+    paddingHorizontal: 18,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  proceedPaymentBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  // QR Payment Modal Styles
+  qrModalCard: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 20,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  promptPayHeader: {
+    width: '100%',
+    backgroundColor: '#003b6d',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  promptPayTitle: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  promptPaySubTitle: {
+    color: '#90caf9',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  qrInstructionText: {
+    fontSize: 13,
+    color: '#475569',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  qrContainer: {
+    width: 210,
+    height: 210,
+    backgroundColor: '#FFFFFF',
+    padding: 10,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: '#e2e8f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  qrImage: {
+    width: 190,
+    height: 190,
+  },
+  qrAmountBox: {
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  qrAmountLabel: {
+    fontSize: 12,
+    color: '#64748b',
+    fontWeight: '600',
+  },
+  qrAmountValue: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: '#003b6d',
+  },
+  qrRefText: {
+    fontSize: 11,
+    color: '#94a3b8',
+    marginTop: 2,
+    fontWeight: '600',
+  },
+  orderSummaryBox: {
+    width: '100%',
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+  },
+  orderSummaryTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#334155',
+    marginBottom: 4,
+  },
+  orderSummaryItem: {
+    fontSize: 11,
+    color: '#475569',
+    lineHeight: 16,
+  },
+  qrStatusBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#e0f2fe',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginBottom: 14,
+  },
+  qrStatusText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#0369a1',
+  },
+  qrModalButtons: {
+    flexDirection: 'row',
+    width: '100%',
+    gap: 10,
+  },
+  qrCancelBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#f1f5f9',
+    alignItems: 'center',
+  },
+  qrCancelBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#64748b',
+  },
+  qrConfirmBtn: {
+    flex: 2,
+    paddingVertical: 12,
+    borderRadius: 10,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+  },
+  qrConfirmBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFFFFF',
+  },
+  // Order Management Styles
+  ordersButton: {
+    backgroundColor: '#8B5CF6',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ordersButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  orderAdminCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    padding: 14,
+    marginBottom: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  orderAdminHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+    paddingBottom: 10,
+    marginBottom: 10,
+  },
+  orderTxnId: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#0f172a',
+  },
+  orderTimeText: {
+    fontSize: 11,
+    color: '#94a3b8',
+    marginTop: 2,
+  },
+  orderStatusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  orderStatusText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  orderItemRow: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  orderItemImage: {
+    width: 52,
+    height: 52,
+    borderRadius: 8,
+    backgroundColor: '#f1f5f9',
+  },
+  orderProductName: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#1e293b',
+  },
+  orderProductMeta: {
+    fontSize: 12,
+    color: '#64748b',
+    marginTop: 2,
+  },
+  orderTotalPrice: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#10B981',
+    marginTop: 2,
+  },
+  orderCustomerBox: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 10,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#f1f5f9',
+    marginBottom: 10,
+  },
+  orderCustomerTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#475569',
+    marginBottom: 4,
+  },
+  orderCustomerText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  orderCustomerAddress: {
+    fontSize: 11,
+    color: '#64748b',
+    marginTop: 2,
+  },
+  statusChangeContainer: {
+    backgroundColor: '#fafafa',
+    borderRadius: 10,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: '#f1f5f9',
+  },
+  statusChangeLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#334155',
+  },
+  statusChangeBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    backgroundColor: '#ffffff',
+  },
+  statusChangeBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  statusBtnActivePending: {
+    backgroundColor: '#fef9c3',
+    borderColor: '#fde047',
+  },
+  statusBtnActiveProcessing: {
+    backgroundColor: '#e0f2fe',
+    borderColor: '#7dd3fc',
+  },
+  statusBtnActiveShipped: {
+    backgroundColor: '#f3e8ff',
+    borderColor: '#d8b4fe',
+  },
+  statusBtnActiveDelivered: {
+    backgroundColor: '#dcfce7',
+    borderColor: '#86efac',
+  },
+  statusBtnActiveCancelled: {
+    backgroundColor: '#fee2e2',
+    borderColor: '#fca5a5',
   },
 });

@@ -58,6 +58,25 @@ const pool = mysql.createPool({
     try { await conn.query("ALTER TABLE user ADD COLUMN role VARCHAR(50) DEFAULT 'user'"); } catch (e) {}
     try { await conn.query("ALTER TABLE users ADD COLUMN role VARCHAR(50) DEFAULT 'user'"); } catch (e) {}
 
+    // Create table 'orders' if not exists
+    await conn.query(`
+      CREATE TABLE IF NOT EXISTS orders (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        txn_id VARCHAR(100) UNIQUE NOT NULL,
+        product_id VARCHAR(100),
+        product_name VARCHAR(255) NOT NULL,
+        product_image TEXT,
+        customer_name VARCHAR(255) NOT NULL,
+        customer_phone VARCHAR(50) NOT NULL,
+        customer_address TEXT NOT NULL,
+        size VARCHAR(50),
+        quantity INT DEFAULT 1,
+        total_price DECIMAL(10,2) NOT NULL,
+        status VARCHAR(50) DEFAULT 'Pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     const alterQueries = [
       "ALTER TABLE products ADD COLUMN brand VARCHAR(100)",
       "ALTER TABLE products ADD COLUMN color VARCHAR(100)",
@@ -601,6 +620,107 @@ app.get('/api/profile', authenticateToken, async (req, res) => {
     console.error('Error fetching profile:', err.message);
     res.status(500).json({ message: 'Internal server error' });
   }
+});
+// 6. Orders API Endpoints (Customer Orders & Admin Management)
+app.post('/api/orders', async (req, res) => {
+  const {
+    txn_id,
+    product_id,
+    product_name,
+    product_image,
+    customer_name,
+    customer_phone,
+    customer_address,
+    size,
+    quantity,
+    total_price,
+    status
+  } = req.body;
+
+  if (!product_name || !customer_name || !customer_phone || !customer_address) {
+    return res.status(400).json({ message: 'Missing required order details' });
+  }
+
+  const txnId = txn_id || `TXN-${Date.now().toString().slice(-6)}-${Math.floor(1000 + Math.random() * 9000)}`;
+  const orderStatus = status || 'Pending';
+
+  try {
+    const [result] = await pool.query(
+      `INSERT INTO orders (txn_id, product_id, product_name, product_image, customer_name, customer_phone, customer_address, size, quantity, total_price, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        txnId,
+        String(product_id || ''),
+        product_name,
+        product_image || '',
+        customer_name,
+        customer_phone,
+        customer_address,
+        size || 'US 8',
+        parseInt(quantity || 1, 10),
+        parseFloat(total_price || 0),
+        orderStatus
+      ]
+    );
+
+    const newOrder = {
+      id: result.insertId,
+      txn_id: txnId,
+      product_id,
+      product_name,
+      product_image,
+      customer_name,
+      customer_phone,
+      customer_address,
+      size,
+      quantity,
+      total_price,
+      status: orderStatus,
+      created_at: new Date().toISOString()
+    };
+
+    res.status(201).json({ message: 'Order created successfully', order: newOrder });
+  } catch (err) {
+    console.error('Error creating order:', err.message);
+    res.status(500).json({ message: 'Failed to create order', error: err.message });
+  }
+});
+
+app.get('/api/orders', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM orders ORDER BY id DESC');
+    res.json(rows);
+  } catch (err) {
+    console.error('Error fetching orders:', err.message);
+    res.status(500).json({ message: 'Failed to fetch orders', error: err.message });
+  }
+});
+
+app.put('/api/orders/:id/status', async (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  if (!status) {
+    return res.status(400).json({ message: 'Status is required' });
+  }
+
+  try {
+    await pool.query('UPDATE orders SET status = ? WHERE id = ? OR txn_id = ?', [status, id, id]);
+    res.json({ message: 'Order status updated successfully', id, status });
+  } catch (err) {
+    console.error('Error updating order status:', err.message);
+    res.status(500).json({ message: 'Failed to update order status', error: err.message });
+  }
+});
+
+app.get('/orders', (req, res) => {
+  req.url = '/api/orders';
+  app.handle(req, res);
+});
+
+app.post('/orders', (req, res) => {
+  req.url = '/api/orders';
+  app.handle(req, res);
 });
 
 // Root API Endpoint (As per slide instructions)
