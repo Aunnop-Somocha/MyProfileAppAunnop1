@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -59,6 +59,14 @@ const PRODUCTS_URL = 'https://raw.githubusercontent.com/Aunnop-Somocha/MyProfile
 const BACKEND_URL = 'http://119.59.102.161/web/dcas/ip/std6730202530/api/products';
 const API_BASE_URL = 'http://119.59.102.161:3049/api';
 
+const MULTI_PORT_ENDPOINTS = [
+  { url: 'http://119.59.102.161:3049/api/products', port: 'Port 3049' },
+  { url: 'http://119.59.102.161:3051/api/products', port: 'Port 3051' },
+  { url: 'http://119.59.102.161:3024/api/products', port: 'Port 3024' },
+  { url: 'http://119.59.102.161:3047/api/products', port: 'Port 3047' },
+  { url: 'http://119.59.102.161:3059/api/products', port: 'Port 3059' },
+];
+
 // Enhanced API Call function with better error handling for cloud
 const apiCall = async (endpoint: string, options: any = {}, authToken?: string) => {
   const isPost = options.method && options.method.toUpperCase() !== 'GET';
@@ -78,29 +86,69 @@ const apiCall = async (endpoint: string, options: any = {}, authToken?: string) 
   return response.json();
 };
 
-const defaultImageForProduct = (name: string = '') => {
+const DEFAULT_PRODUCT_IMAGES = [
+  'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400', // Red Nike Air Max
+  'https://images.unsplash.com/photo-1600185365483-26d7a4cc7519?w=400', // Air Force 1
+  'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?w=400', // Pegasus / Zoom
+  'https://images.unsplash.com/photo-1584735935682-2f2b69dff9d2?w=400', // Adidas Ultraboost
+  'https://images.unsplash.com/photo-1595950653106-6c9ebd614d3a?w=400', // Jordan / Purple Sneaker
+  'https://images.unsplash.com/photo-1512374382149-233c42b6a83b?w=400', // White Sneaker
+  'https://images.unsplash.com/photo-1607522370275-f14206abe5d3?w=400', // Converse High Top
+  'https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77?w=400', // Vans Checkerboard
+  'https://images.unsplash.com/photo-1552346154-21d32810aba3?w=400', // Retro Sneaker
+  'https://images.unsplash.com/photo-1539185441755-769473a23570?w=400', // Blue Running Shoe
+];
+
+const defaultImageForProduct = (name: string = '', index: number = 0) => {
   const lower = (name || '').toLowerCase();
   if (lower.includes('force 1') || lower.includes('af1')) {
-    return 'https://images.unsplash.com/photo-1600185365483-26d7a4cc7519?w=200';
+    return 'https://images.unsplash.com/photo-1600185365483-26d7a4cc7519?w=400';
   }
   if (lower.includes('pegasus') || lower.includes('zoom')) {
-    return 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?w=200';
+    return 'https://images.unsplash.com/photo-1606107557195-0e29a4b5b4aa?w=400';
   }
-  if (lower.includes('ultraboost') || lower.includes('adidas')) {
-    return 'https://images.unsplash.com/photo-1584735935682-2f2b69dff9d2?w=200';
+  if (lower.includes('ultraboost') || lower.includes('adidas') || lower.includes('samba')) {
+    return 'https://images.unsplash.com/photo-1584735935682-2f2b69dff9d2?w=400';
   }
-  return 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200';
+  if (lower.includes('jordan') || lower.includes('dunk')) {
+    return 'https://images.unsplash.com/photo-1595950653106-6c9ebd614d3a?w=400';
+  }
+  if (lower.includes('converse') || lower.includes('all star')) {
+    return 'https://images.unsplash.com/photo-1607522370275-f14206abe5d3?w=400';
+  }
+  if (lower.includes('vans')) {
+    return 'https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77?w=400';
+  }
+  if (lower.includes('running') || lower.includes('runner')) {
+    return 'https://images.unsplash.com/photo-1539185441755-769473a23570?w=400';
+  }
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = (hash << 5) - hash + name.charCodeAt(i);
+    hash |= 0;
+  }
+  const imgIdx = Math.abs(hash + index) % DEFAULT_PRODUCT_IMAGES.length;
+  return DEFAULT_PRODUCT_IMAGES[imgIdx];
 };
 
 const cleanUrl = (url: string = '') => {
   if (!url || typeof url !== 'string') return '';
   let trimmed = url.trim();
-  if (!trimmed) return '';
+  if (!trimmed || trimmed === 'null' || trimmed === 'undefined') return '';
   if (trimmed.startsWith('data:')) {
     return trimmed;
   }
+  if (trimmed.includes('example.com') || trimmed.includes('placeholder')) {
+    return '';
+  }
+  if (trimmed.startsWith('//')) {
+    return 'https:' + trimmed;
+  }
   if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
-    trimmed = 'https://' + trimmed;
+    if (trimmed.startsWith('/')) {
+      return 'http://119.59.102.161' + trimmed;
+    }
+    return 'https://' + trimmed;
   }
   return trimmed;
 };
@@ -175,12 +223,12 @@ const handlePickImageFile = (setImageUrlState: (url: string) => void) => {
   }
 };
 
-const getMatchingImage = (name: string = '', url?: string) => {
+const getMatchingImage = (name: string = '', url?: string, index: number = 0) => {
   const cleaned = cleanUrl(url);
   if (cleaned && cleaned.length > 0) {
     return cleaned;
   }
-  return defaultImageForProduct(name);
+  return defaultImageForProduct(name, index);
 };
 
 export default function ProductsScreen() {
@@ -191,6 +239,7 @@ export default function ProductsScreen() {
   const [authToken, setAuthToken] = useState<string | null>(null);
   const [currentScreen, setCurrentScreen] = useState<string>('products');
   const [failedImages, setFailedImages] = useState<Record<string, boolean>>({});
+  const [portFilter, setPortFilter] = useState<'ALL' | 'OWN'>('ALL');
 
   // Modal & Form state (Add Product)
   const [modalVisible, setModalVisible] = useState<boolean>(false);
@@ -290,37 +339,11 @@ export default function ProductsScreen() {
     }
   };
 
-  // fetchProducts function (As per Slide 24)
+  // fetchProducts function - Aggregates products across all 5 target ports
   const fetchProducts = async () => {
     try {
       setLoading(true);
       setError(null);
-
-      let data: any;
-      try {
-        data = await apiCall(BACKEND_URL);
-      } catch (err) {
-        try {
-          data = await apiCall('http://119.59.102.161:3049/api/products');
-        } catch (err2) {
-          try {
-            data = await apiCall('http://localhost:3049/api/products');
-          } catch (err3) {
-            const savedLocal = typeof window !== 'undefined' ? localStorage.getItem('MY_PRODUCTS_DB') : null;
-            if (savedLocal) {
-              data = JSON.parse(savedLocal);
-            } else {
-              const response = await fetch(PRODUCTS_URL);
-              data = await response.json();
-            }
-          }
-        }
-      }
-
-      const rawRows = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : null;
-      if (!rawRows) {
-        throw new Error('Invalid data format received');
-      }
 
       const defaultColors: Record<string, string> = {
         'Nike Air Max 90': 'Red / White',
@@ -328,25 +351,135 @@ export default function ProductsScreen() {
         'Nike Air Zoom Pegasus 39': 'Lime Green / Black',
       };
 
-      const parsedData = rawRows.map((product: any) => ({
-        ...product,
-        id: String(product.id || Math.random()),
-        name: product.name || '',
-        brand: product.brand || 'Nike',
-        color: product.color || defaultColors[product.name] || 'Standard',
-        price: product.price !== undefined && product.price !== null ? Number(product.price) : 3500,
-        sizes: product.sizes || 'US 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12',
-        stock: product.stock || 0,
-        stock_text: product.stock_text || `${product.stock || 0} in stock`,
-        category: product.category || 'Shoes',
-        location_count: product.location_count || 0,
-        location_text: product.location_text || '0 stores',
-        badge_status: product.badge_status || 'Active',
-        image_url: getMatchingImage(product.name, product.image_url),
-      }));
+const extractProductItems = (data: any): any[] => {
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data.items)) return data.items;
+  if (Array.isArray(data.products)) return data.products;
+  if (Array.isArray(data.data)) return data.data;
+  if (Array.isArray(data.rows)) return data.rows;
+  if (Array.isArray(data.result)) return data.result;
+  if (data.data && Array.isArray(data.data.items)) return data.data.items;
+  if (data.data && Array.isArray(data.data.products)) return data.data.products;
+  return [];
+};
 
-      setProducts(parsedData);
-      console.log(`Loaded ${parsedData.length} products`);
+      const aggregatedProducts: Product[] = [];
+
+      // Concurrently fetch products from all 5 ports with secondary URL fallback
+      const fetchResults = await Promise.allSettled(
+        MULTI_PORT_ENDPOINTS.map(async (ep) => {
+          let data: any = null;
+          try {
+            data = await apiCall(ep.url);
+          } catch (err) {
+            const secondaryUrl = ep.url.replace('/api/products', '/products');
+            try {
+              data = await apiCall(secondaryUrl);
+            } catch (err2) {
+              console.warn(`Failed to fetch from ${ep.url} and ${secondaryUrl}`);
+            }
+          }
+          const rawRows = extractProductItems(data);
+          return { portLabel: ep.port, items: rawRows };
+        })
+      );
+
+      fetchResults.forEach((res) => {
+        if (res.status === 'fulfilled' && Array.isArray(res.value.items) && res.value.items.length > 0) {
+          const { portLabel, items } = res.value;
+          items.forEach((product: any, idx: number) => {
+            const name =
+              product.name ||
+              product.product_name ||
+              product.productName ||
+              product.title ||
+              product.name_th ||
+              product.name_en ||
+              product.model ||
+              `Product ${idx + 1}`;
+
+            const rawPrice = product.price ?? product.Price ?? product.unit_price ?? product.cost;
+            const parsedPrice = rawPrice !== undefined && rawPrice !== null ? Number(rawPrice) : 3500;
+            const priceVal = isNaN(parsedPrice) || parsedPrice <= 0 ? 3500 : parsedPrice;
+
+            const rawStock = product.stock ?? product.Stock ?? product.quantity ?? product.qty ?? product.count;
+            const parsedStock = rawStock !== undefined && rawStock !== null ? Number(rawStock) : 10;
+            const stockVal = isNaN(parsedStock) ? 0 : parsedStock;
+
+            const brandName = product.brand || product.Brand || 'Brand';
+            const colorName = product.color || product.Color || defaultColors[name] || 'Standard';
+            const catName = product.category || product.Category || product.type || 'Shoes';
+
+            const rawImg =
+              product.image_url ||
+              product.imageUrl ||
+              product.image ||
+              product.img ||
+              product.picture ||
+              product.photo ||
+              product.image_path ||
+              product.src ||
+              product.cover ||
+              product.thumbnail;
+
+            const origId = String(product.id || product.product_id || product._id || idx + 1);
+            const uniqueId = `${portLabel.replace(/\s+/g, '_')}_${origId}`;
+
+            aggregatedProducts.push({
+              ...product,
+              id: uniqueId,
+              name: name,
+              brand: brandName,
+              color: colorName,
+              price: priceVal,
+              sizes: product.sizes || 'US 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12',
+              stock: stockVal,
+              stock_text: product.stock_text || `${stockVal} in stock`,
+              category: catName,
+              location_count: product.location_count || 1,
+              location_text: product.location_text || portLabel,
+              badge_status: product.badge_status || portLabel,
+              image_url: getMatchingImage(name, rawImg, idx),
+            });
+          });
+        }
+      });
+
+      // Fallback if all external ports failed to return products
+      if (aggregatedProducts.length === 0) {
+        let fallbackData: any;
+        const savedLocal = typeof window !== 'undefined' ? localStorage.getItem('MY_PRODUCTS_DB') : null;
+        if (savedLocal) {
+          fallbackData = JSON.parse(savedLocal);
+        } else {
+          const response = await fetch(PRODUCTS_URL);
+          fallbackData = await response.json();
+        }
+        const rawRows = Array.isArray(fallbackData) ? fallbackData : Array.isArray(fallbackData?.items) ? fallbackData.items : [];
+        rawRows.forEach((product: any, idx: number) => {
+          const rawImg = product.image_url || product.imageUrl || product.image || product.img || product.picture || product.photo || product.image_path || product.src;
+          aggregatedProducts.push({
+            ...product,
+            id: String(product.id || idx + 1),
+            name: product.name || '',
+            brand: product.brand || 'Nike',
+            color: product.color || defaultColors[product.name] || 'Standard',
+            price: product.price !== undefined && product.price !== null ? Number(product.price) : 3500,
+            sizes: product.sizes || 'US 7, 7.5, 8, 8.5, 9, 9.5, 10, 10.5, 11, 11.5, 12',
+            stock: product.stock || 0,
+            stock_text: product.stock_text || `${product.stock || 0} in stock`,
+            category: product.category || 'Shoes',
+            location_count: product.location_count || 0,
+            location_text: product.location_text || '0 stores',
+            badge_status: product.badge_status || 'Active',
+            image_url: getMatchingImage(product.name, rawImg, idx),
+          });
+        });
+      }
+
+      setProducts(aggregatedProducts);
+      console.log(`Loaded ${aggregatedProducts.length} total products across ports`);
     } catch (err: any) {
       console.error('Fetch products error:', err);
       setError(err.message || 'Failed to load products');
@@ -355,6 +488,42 @@ export default function ProductsScreen() {
       setLoading(false);
     }
   };
+
+  // Strict filter for Port 3049 products only
+  const ownProductsList = useMemo(() => {
+    return products.filter(
+      (p) =>
+        p.id.startsWith('Port_3049_') ||
+        p.id.startsWith('P3049_') ||
+        p.location_text === 'Port 3049' ||
+        p.location_text === 'P3049' ||
+        p.badge_status === 'Port 3049' ||
+        p.badge_status === 'P3049'
+    );
+  }, [products]);
+
+  const filteredProducts = useMemo(() => {
+    return products.filter((product) => {
+      if (portFilter === 'OWN') {
+        const isOwn =
+          product.id.startsWith('Port_3049_') ||
+          product.id.startsWith('P3049_') ||
+          product.location_text === 'Port 3049' ||
+          product.location_text === 'P3049' ||
+          product.badge_status === 'Port 3049' ||
+          product.badge_status === 'P3049';
+        if (!isOwn) return false;
+      }
+      if (!searchQuery.trim()) return true;
+      const query = searchQuery.toLowerCase().trim();
+      return (
+        product.name.toLowerCase().includes(query) ||
+        (product.brand || '').toLowerCase().includes(query) ||
+        (product.category || '').toLowerCase().includes(query) ||
+        (product.color || '').toLowerCase().includes(query)
+      );
+    });
+  }, [products, searchQuery, portFilter]);
 
   // 1. Fetch products when navigating to 'products' screen (As per Slide 25)
   useEffect(() => {
@@ -906,13 +1075,6 @@ export default function ProductsScreen() {
     Alert.alert('Logged Out', 'You have logged out.');
   };
 
-  const filteredProducts = products.filter(
-    (product) =>
-      product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      product.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (product.brand && product.brand.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      (product.color && product.color.toLowerCase().includes(searchQuery.toLowerCase()))
-  );
 
   // Forced Login Screen if not logged in (Password Entry Required)
   if (!currentUser) {
@@ -1101,6 +1263,24 @@ export default function ProductsScreen() {
             )}
             <TouchableOpacity style={styles.filterButton}>
               <Text style={styles.filterText}>Filter ▼</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Port Scope Filter Pills */}
+          <View style={styles.portFilterBar}>
+            <TouchableOpacity
+              style={[styles.portFilterPill, portFilter === 'ALL' && styles.portFilterPillActive]}
+              onPress={() => setPortFilter('ALL')}>
+              <Text style={[styles.portFilterPillText, portFilter === 'ALL' && styles.portFilterPillTextActive]}>
+                🌐 รวมทุกพอร์ต ({products.length})
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.portFilterPill, portFilter === 'OWN' && styles.portFilterPillActive]}
+              onPress={() => setPortFilter('OWN')}>
+              <Text style={[styles.portFilterPillText, portFilter === 'OWN' && styles.portFilterPillTextActive]}>
+                👤 สินค้าของฉันคนเดียว ({ownProductsList.length})
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -2153,6 +2333,36 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+  },
+  portFilterBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 6,
+  },
+  portFilterPill: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: '#F3F4F6',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  portFilterPillActive: {
+    backgroundColor: '#000000',
+    borderColor: '#000000',
+  },
+  portFilterPillText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#4B5563',
+  },
+  portFilterPillTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
   },
   addButton: {
     flex: 1,

@@ -21,6 +21,10 @@ import { KMeansChart } from '@/components/kmeans-chart';
 
 const API_ENDPOINTS = [
   'http://119.59.102.161:3049/api/products',
+  'http://119.59.102.161:3051/api/products',
+  'http://119.59.102.161:3024/api/products',
+  'http://119.59.102.161:3047/api/products',
+  'http://119.59.102.161:3059/api/products',
   'http://119.59.102.161/web/dcas/ip/std6730202530/api/products',
   'https://raw.githubusercontent.com/Aunnop-Somocha/MyProfileAppAunnop1/refs/heads/master/products.json',
 ];
@@ -139,6 +143,7 @@ export default function KMeansDashboardScreen() {
 
   const [products, setProducts] = useState<ProductItem[]>(INITIAL_FALLBACK_PRODUCTS);
   const [loading, setLoading] = useState<boolean>(true);
+  const [dataScope, setDataScope] = useState<'OWN' | 'ALL'>('ALL');
   const [k, setK] = useState<number>(3);
   const [mode, setMode] = useState<'1D' | '2D'>('1D');
   const [selectedClusterId, setSelectedClusterId] = useState<number | null>(null);
@@ -159,66 +164,150 @@ export default function KMeansDashboardScreen() {
     setLoading(true);
     let fetched: ProductItem[] = [];
 
-    for (const url of API_ENDPOINTS) {
+const extractProductItems = (data: any): any[] => {
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data.items)) return data.items;
+  if (Array.isArray(data.products)) return data.products;
+  if (Array.isArray(data.data)) return data.data;
+  if (Array.isArray(data.rows)) return data.rows;
+  if (Array.isArray(data.result)) return data.result;
+  if (data.data && Array.isArray(data.data.items)) return data.data.items;
+  if (data.data && Array.isArray(data.data.products)) return data.data.products;
+  return [];
+};
+
+    const fetchPromises = API_ENDPOINTS.map(async (url) => {
       try {
-        const response = await fetch(url, { headers: { Accept: 'application/json' } });
+        const portMatch = url.match(/:(\d+)\//);
+        const portStr = portMatch ? `P${portMatch[1]}` : 'Remote';
+        let response = await fetch(url, { headers: { Accept: 'application/json' } });
+        if (!response.ok && url.includes('/api/products')) {
+          const secondaryUrl = url.replace('/api/products', '/products');
+          response = await fetch(secondaryUrl, { headers: { Accept: 'application/json' } });
+        }
         if (response.ok) {
           const data = await response.json();
-          const itemsRaw = Array.isArray(data) ? data : data.items || [];
+          const itemsRaw = extractProductItems(data);
           if (itemsRaw.length > 0) {
-            fetched = itemsRaw.map((item: any, idx: number) => ({
-              id: String(item.id || idx + 1),
-              name: item.name || `Product ${idx + 1}`,
-              brand: item.brand || 'Brand',
-              color: item.color || 'Standard',
-              price: typeof item.price === 'number' ? item.price : parseFloat(item.price || item.Price || '3500') || 3500,
-              stock: typeof item.stock === 'number' ? item.stock : parseInt(item.stock || '10', 10) || 10,
-              category: item.category || 'General',
-              image_url: item.image_url || 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=200',
-            }));
-            break;
+            return itemsRaw.map((item: any, idx: number) => {
+              const name =
+                item.name ||
+                item.product_name ||
+                item.productName ||
+                item.title ||
+                item.name_th ||
+                item.name_en ||
+                item.model ||
+                `Product ${idx + 1}`;
+
+              const rawPrice = item.price ?? item.Price ?? item.unit_price ?? item.cost;
+              const parsedPrice = typeof rawPrice === 'number' ? rawPrice : parseFloat(rawPrice || '3500') || 3500;
+              const priceVal = isNaN(parsedPrice) || parsedPrice <= 0 ? 3500 : parsedPrice;
+
+              const rawStock = item.stock ?? item.Stock ?? item.quantity ?? item.qty ?? item.count;
+              const parsedStock = typeof rawStock === 'number' ? rawStock : parseInt(rawStock || '10', 10) || 10;
+              const stockVal = isNaN(parsedStock) ? 0 : parsedStock;
+
+              const rawImg =
+                item.image_url ||
+                item.imageUrl ||
+                item.image ||
+                item.img ||
+                item.picture ||
+                item.photo ||
+                item.image_path ||
+                item.src ||
+                item.cover ||
+                item.thumbnail;
+
+              const validImg =
+                rawImg && typeof rawImg === 'string' && rawImg.trim().length > 0 && !rawImg.includes('example.com') && !rawImg.includes('placeholder')
+                  ? rawImg.trim().startsWith('http')
+                    ? rawImg.trim()
+                    : rawImg.trim().startsWith('/')
+                    ? `http://119.59.102.161${rawImg.trim()}`
+                    : `https://${rawImg.trim()}`
+                  : 'https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400';
+
+              const origId = String(item.id || item.product_id || item._id || idx + 1);
+
+              return {
+                id: `${portStr}_${origId}`,
+                name: name,
+                brand: item.brand || item.Brand || 'Brand',
+                color: item.color || item.Color || 'Standard',
+                price: priceVal,
+                stock: stockVal,
+                category: item.category || item.Category || item.type || 'General',
+                location_text: item.location_text || portStr,
+                badge_status: item.badge_status || portStr,
+                image_url: validImg,
+              };
+            });
           }
         }
       } catch (err) {
-        console.log(`Failed to fetch from ${url}, trying next endpoint...`);
+        console.log(`Failed to fetch from ${url}`);
       }
-    }
+      return [];
+    });
+
+    const results = await Promise.all(fetchPromises);
+    results.forEach((items) => {
+      fetched.push(...items);
+    });
 
     if (fetched.length > 0) {
-      // Combine fetched with fallback to ensure rich clustering sample if API has few products
-      const existingIds = new Set(fetched.map((p) => p.id));
-      const combined = [
-        ...fetched,
-        ...INITIAL_FALLBACK_PRODUCTS.filter((p) => !existingIds.has(p.id)),
-      ];
-      setProducts(combined);
+      setProducts(fetched);
     } else {
       setProducts(INITIAL_FALLBACK_PRODUCTS);
     }
     setLoading(false);
   };
 
-  // Run K-Means Clustering on current product dataset
+  // Strict filter for Port 3049 products only
+  const ownProductsList = useMemo(() => {
+    return products.filter(
+      (p) =>
+        p.id.startsWith('P3049_') ||
+        p.id.startsWith('Port_3049_') ||
+        p.location_text === 'P3049' ||
+        p.location_text === 'Port 3049' ||
+        p.badge_status === 'P3049' ||
+        p.badge_status === 'Port 3049'
+    );
+  }, [products]);
+
+  // Filter products by selected scope (My Port 3049 vs All Ports)
+  const activeProducts = useMemo(() => {
+    if (dataScope === 'OWN') {
+      return ownProductsList;
+    }
+    return products;
+  }, [products, ownProductsList, dataScope]);
+
+  // Run K-Means Clustering on active dataset
   const kMeansResult: KMeansOutput = useMemo(() => {
-    return runKMeans(products, k, mode);
-  }, [products, k, mode]);
+    return runKMeans(activeProducts, k, mode);
+  }, [activeProducts, k, mode]);
 
   // Overall Statistics
   const overallStats = useMemo(() => {
-    if (!products.length) return { total: 0, minPrice: 0, maxPrice: 0, avgPrice: 0, totalVal: 0 };
-    const prices = products.map((p) => p.price);
+    if (!activeProducts.length) return { total: 0, minPrice: 0, maxPrice: 0, avgPrice: 0, totalVal: 0 };
+    const prices = activeProducts.map((p) => p.price);
     const minP = Math.min(...prices);
     const maxP = Math.max(...prices);
     const sumP = prices.reduce((a, b) => a + b, 0);
-    const totalV = products.reduce((a, b) => a + b.price * b.stock, 0);
+    const totalV = activeProducts.reduce((a, b) => a + b.price * b.stock, 0);
     return {
-      total: products.length,
+      total: activeProducts.length,
       minPrice: minP,
       maxPrice: maxP,
-      avgPrice: Math.round(sumP / products.length),
+      avgPrice: Math.round(sumP / activeProducts.length),
       totalVal: totalV,
     };
-  }, [products]);
+  }, [activeProducts]);
 
   // Filtered Products based on selected cluster card
   const activeClusterProducts = useMemo(() => {
@@ -296,6 +385,41 @@ export default function KMeansDashboardScreen() {
 
             <TouchableOpacity style={styles.simulateBtn} onPress={() => setIsModalOpen(true)}>
               <Text style={styles.simulateBtnText}>+ Add Test Price</Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Scope Selector: My Own Products vs All Ports Combined */}
+          <View style={[styles.scopeSwitcherContainer, { backgroundColor: theme.backgroundElement }]}>
+            <TouchableOpacity
+              style={[styles.scopeTab, dataScope === 'ALL' && styles.scopeTabActive]}
+              onPress={() => {
+                setDataScope('ALL');
+                setSelectedClusterId(null);
+              }}>
+              <Text style={[styles.scopeTabText, { color: theme.textSecondary }, dataScope === 'ALL' && styles.scopeTabTextActive]}>
+                🌐 รวมสินค้าทุกพอร์ต (All 5 Ports)
+              </Text>
+              <View style={[styles.scopeBadge, dataScope === 'ALL' && styles.scopeBadgeActive]}>
+                <Text style={[styles.scopeBadgeText, dataScope === 'ALL' && styles.scopeBadgeTextActive]}>
+                  {products.length} Items
+                </Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.scopeTab, dataScope === 'OWN' && styles.scopeTabActive]}
+              onPress={() => {
+                setDataScope('OWN');
+                setSelectedClusterId(null);
+              }}>
+              <Text style={[styles.scopeTabText, { color: theme.textSecondary }, dataScope === 'OWN' && styles.scopeTabTextActive]}>
+                👤 สินค้าของฉันคนเดียว (Port 3049)
+              </Text>
+              <View style={[styles.scopeBadge, dataScope === 'OWN' && styles.scopeBadgeActive]}>
+                <Text style={[styles.scopeBadgeText, dataScope === 'OWN' && styles.scopeBadgeTextActive]}>
+                  {ownProductsList.length} Items
+                </Text>
+              </View>
             </TouchableOpacity>
           </View>
 
@@ -1023,6 +1147,60 @@ const styles = StyleSheet.create({
   },
   modalSubmitText: {
     color: '#FFF',
+    fontWeight: '700',
+  },
+  scopeSwitcherContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 6,
+    borderRadius: 14,
+    marginVertical: Spacing.three,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  scopeTab: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    gap: 8,
+  },
+  scopeTabActive: {
+    backgroundColor: '#3B82F6',
+    shadowColor: '#3B82F6',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  scopeTabText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  scopeTabTextActive: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  scopeBadge: {
+    backgroundColor: 'rgba(156, 163, 175, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  scopeBadgeActive: {
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+  },
+  scopeBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#9CA3AF',
+  },
+  scopeBadgeTextActive: {
+    color: '#FFFFFF',
     fontWeight: '700',
   },
 });
